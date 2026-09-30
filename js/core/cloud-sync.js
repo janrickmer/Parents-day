@@ -28,6 +28,7 @@ import {
   onEventDraftStored,
   loadEventDraft,
   storeEventDraft,
+  clearEventDraft,
   isEmptyTeacherState,
 } from './storage.js';
 import {
@@ -435,6 +436,7 @@ async function create(code, cfg, keys) {
   try {
     const res = await createCloudRecord(keys, sealed.data, cfg.pendingAdminHash);
     markSynced(code, keys.syncId, res.version, sealed.hash);
+    await touch(keys);
   } catch (err) {
     if (!(err instanceof MailboxError)) throw err;
     if (err.status === 429 || err.status === 507) {
@@ -457,6 +459,15 @@ async function create(code, cfg, keys) {
       keys.syncId,
     );
     await resolveConflict(code, keys, { rec, remote: unpackCloudData(await decryptCloudData(keys, rec)) }, { noBase: true });
+  }
+}
+
+/** Erster Abruf nach dem Anlegen: Die Sicherung gilt damit als genutzt (sonst würde sie nach 30 Tagen gelöscht). */
+async function touch(keys) {
+  try {
+    await fetchCloudRecord(keys, { since: 1 });
+  } catch {
+    // holt der nächste Abgleich nach
   }
 }
 
@@ -490,18 +501,10 @@ async function pullRemote(code, cfg, keys) {
     return;
   }
   if (rec.version < cfg.version) {
-    // Der Dienst hat einen älteren Stand als dieses Gerät (z. B. nach einer Wiederherstellung der Datenbank):
-    // den Stand dieses Geräts wieder hochladen statt Änderungen zu verlieren.
-    updateConfig(
-      code,
-      (c) => {
-        c.version = rec.version;
-        c.dirty = true;
-      },
-      cfg.syncId,
-    );
-    again = true;
-    return;
+    // Der Dienst hat eine ältere Version als dieses Gerät (z. B. Datenbank wiederhergestellt oder die Sicherung
+    // gelöscht und mit demselben Passwort neu eingerichtet): kein gemeinsamer Stand – gleich ist gut, sonst
+    // entscheidet die Lehrkraft.
+    return resolveConflict(code, keys, { rec, remote }, { noBase: true });
   }
   // Während des Abrufs hier geändert? Dann haben beide Seiten Neues.
   if (latest.dirty) return resolveConflict(code, keys, { rec, remote });
@@ -559,7 +562,9 @@ function applyRemote(code, syncId, remote, rec, source = 'sync') {
   applyingRemote = true;
   try {
     saved = replaceState(next, { keepSavedAt: true });
+    // Entwurf wie in der Cloud – auch keiner (sonst käme ein anderswo verworfener Entwurf zurück).
     if (remote.eventDraft) storeEventDraft(saved, remote.eventDraft);
+    else clearEventDraft(saved);
   } finally {
     applyingRemote = false;
   }
@@ -746,7 +751,8 @@ export async function setupCloud(teacher, password, { remember = true } = {}) {
       try {
         const rec = await openCloudRecord(keys, keys.device);
         if (rec.found) {
-          saveCloudConfig(code, { ...existing, remember });
+          // Ältere Version als zuletzt gesehen: neu eingerichtet – dann ohne gemeinsamen Stand abgleichen.
+          saveCloudConfig(code, rec.version >= existing.version ? { ...existing, remember } : { ...existing, version: 0, remember });
           saveKeys(code, keys, remember);
           if (code === active) problem = null;
           await syncRounds(code, { pull: true, keepalive: false });
@@ -832,10 +838,15 @@ async function verifyPassword(code, teacher, password) {
 }
 
 /**
- * Zieht die Sicherung unter ein neues Passwort um: neue Sicherung mit dem (aktuellen) Stand anlegen, dann die alte
- * löschen (mit Admin-Token) oder – ohne bisheriges Passwort bzw. wenn das Löschen scheitert – mit dem Hinweis
- * „umgezogen“ überschreiben. Klappt beides nicht, wird die neue wieder gelöscht und nichts geändert.
- * @returns {Promise<{oldLeft: boolean}>} oldLeft: die alte Sicherung wurde nicht gelöscht, nur ersetzt
+ * Zieht die Sicherung unter ein neues Passwort um:
+ *  1. abgleichen (sonst ginge verloren, was ein anderes Gerät eben gesichert hat),
+ *  2. neue Sicherung mit dem aktuellen Stand anlegen,
+ *  3. die alte – nur wenn sie noch unverändert ist (Versionsprüfung beim Dienst) – mit dem Hinweis „umgezogen“
+ *     überschreiben: andere Geräte fragen dann nach dem neuen Passwort,
+ *  4. die alte löschen, wenn das bisherige Passwort bekannt ist (Admin-Token).
+ * Scheitert Schritt 3 nachweislich, wird die neue wieder gelöscht und nichts geändert. Ist unklar, ob Schritt 3
+ * geklappt hat (Antwort verloren), bleiben beide Sicherungen – so geht nichts verloren.
+ * @returns {Promise<{oldLeft: boolean}>} oldLeft: die alte Sicherung ist noch da (mit dem Hinweis „umgezogen“)
  */
 async function moveCloud(code, teacher, newPassword, { oldAdminToken = null } = {}) {
   const fresh = await keysFor(code, teacher, newPassword);
@@ -844,7 +855,6 @@ async function moveCloud(code, teacher, newPassword, { oldAdminToken = null } = 
     const keys = loadKeys(code);
     if (!keys) throw new Error('Die Cloud-Sicherung ist auf diesem Gerät nicht verbunden.');
     if (fresh.syncId === keys.syncId) throw new Error('Das neue Passwort ist dasselbe wie das bisherige.');
-    // Zuerst auf den neuesten Stand bringen – sonst ginge verloren, was ein anderes Gerät eben gesichert hat.
     await syncRounds(code, { pull: true, keepalive: false });
     const cfg = loadCloudConfig(code);
     if (!cfg || !loadKeys(code) || cfg.pendingCreate || cfg.dirty || cfg.version === 0 || problem) {
@@ -852,49 +862,78 @@ async function moveCloud(code, teacher, newPassword, { oldAdminToken = null } = 
     }
     const sealed = await sealCurrent(code, fresh, 1);
     if (!sealed) throw new Error('In diesem Browser ist kein Stand gespeichert.');
+    let freshVersion = 1;
     try {
       await createCloudRecord(fresh, sealed.data, adminHash);
     } catch (err) {
-      if (err instanceof MailboxError && err.status === 409) throw new Error('Mit diesem Passwort gibt es bereits eine andere Cloud-Sicherung. Bitte wählen Sie ein anderes Passwort.');
-      throw err;
+      if (!(err instanceof MailboxError) || err.status !== 409) throw err;
+      // Schon vorhanden: Ist es die eigene aus einem abgebrochenen Versuch (gleicher Stand), weiter mit ihr.
+      const rec = await openCloudRecord(fresh, fresh.device);
+      const own = rec.found && (await decryptCloudData(fresh, rec).then(unpackCloudData).catch(() => null));
+      if (!own || !sameContent(own.state, loadTeacherState(code))) {
+        throw new Error('Mit diesem Passwort gibt es bereits eine andere Cloud-Sicherung. Bitte wählen Sie ein anderes Passwort.');
+      }
+      freshVersion = rec.version;
     }
-    const rollback = async (message) => {
-      await deleteCloudRecord(fresh, fresh.adminToken).catch(() => {});
-      throw new Error(message);
-    };
-    // Hat ein anderes Gerät die alte Sicherung inzwischen geändert? Dann nicht umziehen.
+    // Schritt 3: Hinweis „umgezogen“ – nur, wenn die alte Sicherung noch auf dem abgeglichenen Stand ist.
+    let moved = false;
     try {
-      const check = await fetchCloudRecord(keys, { since: cfg.version });
-      if (!check.unchanged) await rollback('Ihr Stand wurde gerade auf einem anderen Gerät geändert. Bitte versuchen Sie es gleich noch einmal.');
+      await saveCloudRecord(keys, cfg.version, await encryptCloudData(keys, packMovedNotice(), cfg.version + 1));
+      moved = true;
     } catch (err) {
-      if (err instanceof MailboxError) await rollback(cloudErrorMessage(err));
-      throw err;
+      const verdict = await oldRecordState(keys, cfg.version);
+      if (verdict === 'moved' || verdict === 'gone') moved = true;
+      else if (verdict === 'unchanged' || verdict === 'changed' || (err instanceof MailboxError && err.status === 409)) {
+        // Die bisherige Sicherung ist nachweislich noch in Gebrauch: die neue wieder löschen.
+        await deleteCloudRecord(fresh, fresh.adminToken).catch(() => {});
+        throw new Error(
+          verdict === 'changed' || (err instanceof MailboxError && err.status === 409)
+            ? 'Ihr Stand wurde gerade auf einem anderen Gerät geändert. Bitte versuchen Sie es gleich noch einmal.'
+            : `Die bisherige Cloud-Sicherung ließ sich nicht umstellen. ${err instanceof MailboxError ? cloudErrorMessage(err) : ''}`.trim(),
+        );
+      } else {
+        // Unklar (keine Verbindung): nichts löschen. Dieses Gerät bleibt bei der bisherigen Sicherung; hat der
+        // Hinweis doch geklappt, fragt es beim nächsten Abgleich nach dem neuen Passwort – die neue Sicherung steht.
+        throw new Error('Die Verbindung zur Cloud-Sicherung ist abgebrochen. Bitte prüfen Sie die Verbindung und versuchen Sie es noch einmal.');
+      }
     }
-    let oldLeft = false;
-    let removed = false;
+    let oldLeft = moved;
     if (oldAdminToken) {
       try {
-        removed = await deleteCloudRecord(keys, oldAdminToken);
+        if (await deleteCloudRecord(keys, oldAdminToken)) oldLeft = false;
       } catch (err) {
+        // Die alte Sicherung trägt ja den Hinweis „umgezogen“ und wird ohne Nutzung automatisch gelöscht.
         console.warn(err);
       }
     }
-    if (!removed) {
-      // Hinweis „umgezogen“: Andere Geräte fragen dann nach dem neuen Passwort statt weiter die alte zu nutzen.
-      try {
-        await saveCloudRecord(keys, cfg.version, await encryptCloudData(keys, packMovedNotice(), cfg.version + 1));
-        oldLeft = true;
-      } catch (err) {
-        await rollback(`Die alte Cloud-Sicherung ließ sich nicht umstellen. ${err instanceof MailboxError ? cloudErrorMessage(err) : ''}`.trim());
-      }
-    }
-    saveCloudConfig(code, { syncId: fresh.syncId, version: 1, dirty: false, syncedHash: sealed.hash, pendingCreate: false, syncedAt: new Date().toISOString(), remember: cfg.remember });
+    saveCloudConfig(code, { syncId: fresh.syncId, version: freshVersion, dirty: false, syncedHash: sealed.hash, pendingCreate: false, syncedAt: new Date().toISOString(), remember: cfg.remember });
     saveKeys(code, fresh, cfg.remember);
-    markSynced(code, fresh.syncId, 1, sealed.hash);
+    markSynced(code, fresh.syncId, freshVersion, sealed.hash);
+    await touch(fresh);
     if (code === active) problem = null;
     emitStatus();
     return { oldLeft };
   });
+}
+
+/**
+ * Zustand der bisherigen Sicherung nach einem unklaren Schreibversuch: 'moved' (Hinweis steht), 'gone' (kein
+ * Zugang mehr – gelöscht), 'unchanged' (noch die abgeglichene Version), 'changed' oder 'unknown' (keine Verbindung).
+ */
+async function oldRecordState(keys, version) {
+  try {
+    const rec = await fetchCloudRecord(keys);
+    if (!rec.found) return 'gone';
+    if (rec.version === version) return 'unchanged';
+    try {
+      unpackCloudData(await decryptCloudData(keys, rec));
+      return 'changed';
+    } catch (err) {
+      return err instanceof CloudMovedError ? 'moved' : 'changed';
+    }
+  } catch (err) {
+    return err instanceof MailboxError && err.status === 403 ? 'gone' : 'unknown';
+  }
 }
 
 /**

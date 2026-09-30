@@ -327,11 +327,21 @@ export function openSetupDialog({ teacher, allowLater = false, intro = '', offer
       remember.wrap,
       offerUnlock ? h('p', { class: 'small' }, linkButton('Ich habe schon eine Cloud-Sicherung', 'cloud-setup-have', () => dlg.close('unlock'))) : null,
     ),
-    onSubmit: async ({ close }) => {
+    onSubmit: async ({ close, showError }) => {
       const password = pw.check();
       if (!password) return;
       const before = loadTeacherState(teacher.teacherCode);
       const status = await setupCloud(teacher, password, { remember: remember.input.checked });
+      if (status.kind === 'needs-password') {
+        // Mit diesem Passwort gab es eine Sicherung, deren Passwort inzwischen geändert wurde.
+        close('unlock-needed');
+        await openUnlockDialog({ teacher, message: status.message });
+        return;
+      }
+      if (status.kind === 'locked' || status.kind === 'error') {
+        showError(status.message || 'Die Cloud-Sicherung konnte nicht eingerichtet werden. Bitte versuchen Sie es später noch einmal.');
+        return;
+      }
       announceSetup(status, before, loadTeacherState(teacher.teacherCode));
       close('created');
     },
@@ -483,7 +493,7 @@ export function openForgotDialog({ teacher }) {
             h(
               'p',
               {},
-              'Sonst können Sie hier eine neue Cloud-Sicherung mit neuem Passwort einrichten. Sie beginnt mit dem Stand dieses Geräts. Die alte wird nach 400 Tagen ohne Nutzung automatisch gelöscht; Geräte, die noch mit ihr verbunden sind, verbinden Sie dort mit „Passwort vergessen?“ bzw. dem neuen Passwort.',
+              'Sonst können Sie hier eine neue Cloud-Sicherung mit neuem Passwort einrichten. Sie beginnt mit dem Stand dieses Geräts. Die alte wird nach 400 Tagen ohne Nutzung automatisch gelöscht. Geräte, die noch mit ihr verbunden sind, verbinden Sie dort unter „Weitere Einstellungen“ mit „Mit neuem Passwort verbinden“.',
             ),
             empty
               ? alertBox('warning', h('p', {}, h('strong', {}, 'Auf diesem Gerät sind noch keine Daten gespeichert. '), 'Richten Sie die neue Cloud-Sicherung am besten an dem Gerät ein, an dem Sie zuletzt gearbeitet haben.'))
@@ -690,8 +700,9 @@ export async function cloudAfterLogin(teacher, { onProgress = () => {} } = {}) {
  * Cloud-Sicherung bei der Registrierung mit dem gewählten Passwort einrichten. Gibt es mit diesem Passwort schon
  * eine (erneute Registrierung, z. B. an einem neuen Gerät), wird deren Stand geladen.
  * @param {{remember?: boolean, email?: string}} [opts] – email: bei der Registrierung eingegebene Adresse
- * @returns {Promise<'created'|'pending'|'restored'|'kept'>}
- *   pending: wird hochgeladen, sobald der Dienst erreichbar ist; kept: dieses Gerät war schon verbunden
+ * @returns {Promise<'created'|'pending'|'restored'|'kept'|'moved'|'failed'>}
+ *   pending: wird hochgeladen, sobald der Dienst erreichbar ist; kept: dieses Gerät war schon verbunden;
+ *   moved: mit diesem Passwort gab es eine Sicherung, deren Passwort inzwischen geändert wurde; failed: gesperrt o. Ä.
  */
 export async function cloudAfterRegister(teacher, password, { remember = true, email = '' } = {}) {
   const code = teacher.teacherCode;
@@ -711,6 +722,8 @@ export async function cloudAfterRegister(teacher, password, { remember = true, e
     });
   }
   if (restored) return 'restored';
+  if (status.kind === 'needs-password') return 'moved';
+  if (status.kind === 'locked' || status.kind === 'error') return 'failed';
   return ['ok', 'pending', 'syncing', 'conflict'].includes(status.kind) ? 'created' : 'pending';
 }
 
@@ -857,6 +870,12 @@ export function cloudSettingsCard(teacher) {
           }),
           button('Passwort ändern', 'cloud-change-password', () => openChangePasswordDialog(teacher)),
           button('Passwort vergessen?', 'cloud-card-forgot', () => openForgotDialog({ teacher })),
+          button('Mit neuem Passwort verbinden', 'cloud-card-relink', () =>
+            openUnlockDialog({
+              teacher,
+              message: 'Haben Sie auf einem anderen Gerät eine neue Cloud-Sicherung mit einem neuen Passwort eingerichtet? Dann geben Sie hier dieses neue Passwort ein – dieses Gerät gleicht danach mit der neuen Sicherung ab.',
+            }),
+          ),
           button('Cloud-Sicherung löschen', 'cloud-delete', () => openDeleteCloudDialog(teacher)),
         ),
         h('p', { class: 'muted small' }, 'Ende-zu-Ende-verschlüsselt: Ihr Passwort verlässt diesen Browser nie. Ohne das Passwort kann niemand die Sicherung lesen – auch nicht ParentsDay.'),

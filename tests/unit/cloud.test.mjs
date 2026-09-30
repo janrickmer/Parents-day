@@ -132,7 +132,7 @@ test('Dienst: anlegen nur mit passendem Token; mit demselben Passwort gibt es si
   // keine öffentliche Abfrage, ob es eine Sicherung gibt
   assert.equal((await call('GET', `/v1/sync/${k.syncId}/salt`)).status, 404);
   // In der Datenbank steht weder die Adresse noch who im Klartext
-  const row = srv.db.db.prepare('SELECT * FROM cloud WHERE id = ?').get(await rowId(k));
+  const row = srv.db.db.prepare('SELECT * FROM backups WHERE id = ?').get(await rowId(k));
   assert.ok(row);
   assert.ok(!JSON.stringify(row).includes(k.who) && !JSON.stringify(row).includes(k.syncId));
 });
@@ -250,15 +250,15 @@ test('Dienst: abgewiesenes Anlegen (Grenze je Anschluss, Speicher voll) zählt n
   assert.equal((await create(k, { n: 1 }, { ip: '198.51.100.100' })).status, 201);
   // Speicher voll: Größe zählt nach echtem Umfang
   srv.db.db
-    .prepare("INSERT INTO cloud (id, version, updated_at, seen_at, auth_hash, admin_hash, devices, iv, z, chunks, size, writer) VALUES ('platzhalter', 1, 0, ?, 'a', 'b', '[]', 'x', 0, 0, 250000000, 'w')")
+    .prepare("INSERT INTO backups (id, version, updated_at, seen_at, auth_hash, admin_hash, devices, iv, z, chunks, size, writer) VALUES ('platzhalter', 1, 0, ?, 'a', 'b', '[]', 'x', 0, 0, 250000000, 'w')")
     .run(Date.now());
   const full = await keysFor('Sonne Tafel Kreide 7');
   const res = await create(full, { n: 1 }, { ip: '198.51.100.101' });
   assert.equal(res.status, 507);
-  srv.db.db.prepare("DELETE FROM cloud WHERE id = 'platzhalter'").run();
+  srv.db.db.prepare("DELETE FROM backups WHERE id = 'platzhalter'").run();
   assert.equal((await create(full, { n: 1 }, { ip: '198.51.100.101' })).status, 201);
   // Viele kleine Sicherungen füllen den Speicher nicht: gezählt wird der echte Umfang
-  const total = srv.db.db.prepare('SELECT SUM(size) AS n FROM cloud').get();
+  const total = srv.db.db.prepare('SELECT SUM(size) AS n FROM backups').get();
   assert.ok(Number(total.n) < 100000);
 });
 
@@ -269,7 +269,7 @@ test('Dienst: löschen nur mit Admin-Token aus dem Passwort und eingetragenem Ge
   assert.equal((await call('DELETE', `/v1/sync/${k.syncId}`, as(k, { token: k.adminToken, device: newDeviceSecret() }))).status, 403);
   assert.deepEqual(await (await call('DELETE', `/v1/sync/${k.syncId}`, as(k, { token: k.adminToken }))).json(), { deleted: true });
   assert.equal((await call('GET', `/v1/sync/${k.syncId}`, as(k))).status, 403);
-  assert.equal(Number(srv.db.db.prepare('SELECT COUNT(*) AS n FROM cloud_chunks WHERE cloud_id = ?').get(await rowId(k)).n), 0);
+  assert.equal(Number(srv.db.db.prepare('SELECT COUNT(*) AS n FROM backup_chunks WHERE backup_id = ?').get(await rowId(k)).n), 0);
 });
 
 test('Dienst: große Stände in Stücken, zu große abgelehnt', async () => {
@@ -284,8 +284,8 @@ test('Dienst: große Stände in Stücken, zu große abgelehnt', async () => {
   assert.equal(got.ct, big.ct);
   const small = await encryptCloudData(k, { klein: true }, 3);
   assert.equal((await call('PUT', `/v1/sync/${k.syncId}`, as(k, { body: { baseVersion: 2, ...small } }))).status, 200);
-  assert.equal(Number(srv.db.db.prepare('SELECT COUNT(*) AS n FROM cloud_chunks WHERE cloud_id = ?').get(await rowId(k)).n), 1);
-  assert.equal(Number(srv.db.db.prepare('SELECT size FROM cloud WHERE id = ?').get(await rowId(k)).size), small.ct.length);
+  assert.equal(Number(srv.db.db.prepare('SELECT COUNT(*) AS n FROM backup_chunks WHERE backup_id = ?').get(await rowId(k)).n), 1);
+  assert.equal(Number(srv.db.db.prepare('SELECT size FROM backups WHERE id = ?').get(await rowId(k)).size), small.ct.length);
   const huge = { iv: small.iv, z: 0, ct: 'A'.repeat(720001) };
   assert.equal((await call('PUT', `/v1/sync/${k.syncId}`, as(k, { body: { baseVersion: 3, ...huge } }))).status, 400);
 });
@@ -293,21 +293,27 @@ test('Dienst: große Stände in Stücken, zu große abgelehnt', async () => {
 test('Dienst: Aufräumen – 400 Tage ohne Nutzung, nie genutzte nach 30 Tagen, Zähler nach 2 Tagen', async () => {
   const old = await keysFor('Sonne Tafel Kreide 7');
   const unused = await keysFor('Sonne Tafel Kreide 7');
+  const read = await keysFor('Sonne Tafel Kreide 7');
   const used = await keysFor('Sonne Tafel Kreide 7');
   const recent = await keysFor('Sonne Tafel Kreide 7');
-  for (const k of [old, unused, used, recent]) await create(k, { n: 1 }, { ip: '198.51.100.130' });
+  for (const k of [old, unused, read, used, recent]) await create(k, { n: 1 }, { ip: '198.51.100.130' });
   await call('PUT', `/v1/sync/${used.syncId}`, as(used, { body: { baseVersion: 1, ...(await encryptCloudData(used, { n: 2 }, 2)) } }));
+  // Nur abgerufen, nie geändert (z. B. nach einem Passwortwechsel): gilt als genutzt
+  assert.equal((await call('GET', `/v1/sync/${read.syncId}?since=1`, as(read))).status, 200);
   const day = 24 * 3600 * 1000;
-  srv.db.db.prepare('UPDATE cloud SET seen_at = seen_at - ? WHERE id = ?').run(400 * day, await rowId(old));
-  srv.db.db.prepare('UPDATE cloud SET seen_at = seen_at - ? WHERE id = ?').run(31 * day, await rowId(unused));
-  srv.db.db.prepare('UPDATE cloud SET seen_at = seen_at - ? WHERE id = ?').run(31 * day, await rowId(used));
+  const age = (k, days) => rowId(k).then((id) => srv.db.db.prepare('UPDATE backups SET seen_at = seen_at - ?, updated_at = updated_at - ? WHERE id = ?').run(days * day, days * day, id));
+  await age(old, 400);
+  await age(unused, 31);
+  await age(read, 31);
+  await age(used, 31);
   srv.db.db.prepare('UPDATE cloud_limits SET win = win - ?').run(3 * day);
   await worker.scheduled({}, srv.env);
   assert.equal((await call('GET', `/v1/sync/${old.syncId}`, as(old))).status, 403);
   assert.equal((await call('GET', `/v1/sync/${unused.syncId}`, as(unused))).status, 403, 'nie genutzt → nach 30 Tagen weg');
-  assert.equal((await call('GET', `/v1/sync/${used.syncId}`, as(used))).status, 200, 'genutzt → bleibt');
+  assert.equal((await call('GET', `/v1/sync/${read.syncId}`, as(read))).status, 200, 'abgerufen → bleibt');
+  assert.equal((await call('GET', `/v1/sync/${used.syncId}`, as(used))).status, 200, 'geändert → bleibt');
   assert.equal((await call('GET', `/v1/sync/${recent.syncId}`, as(recent))).status, 200);
-  assert.equal(Number(srv.db.db.prepare('SELECT COUNT(*) AS n FROM cloud_chunks WHERE cloud_id = ?').get(await rowId(old)).n), 0);
+  assert.equal(Number(srv.db.db.prepare('SELECT COUNT(*) AS n FROM backup_chunks WHERE backup_id = ?').get(await rowId(old)).n), 0);
   assert.equal(Number(srv.db.db.prepare("SELECT COUNT(*) AS n FROM cloud_limits WHERE win < ?").get(Date.now() - 2 * day).n), 0);
 });
 
@@ -321,5 +327,5 @@ test('Dienst: unbekannte Pfade, Methoden und CORS', async () => {
   assert.match(pre.headers.get('access-control-allow-headers'), /X-Device/);
   assert.match(pre.headers.get('access-control-allow-headers'), /X-Who/);
   const health = await (await call('GET', '/v1/health')).json();
-  assert.equal(health.sync, 2);
+  assert.equal(health.sync, 3);
 });

@@ -220,12 +220,12 @@ export function cloudErrorMessage(err) {
 }
 
 /**
- * Unterstützt der Dienst die Cloud-Sicherung (Verfahren v2)? Ältere Fassungen des Workers kennen sie nicht.
+ * Unterstützt der Dienst diese Fassung der Cloud-Sicherung? Ältere Fassungen des Workers kennen sie nicht.
  * Wirft ohne Verbindung (MailboxError, offline).
  */
 export async function cloudServiceReady() {
   const data = await call('GET', '/v1/health', { timeout: 8000 });
-  return Number(data?.sync) >= 2;
+  return Number(data?.sync) >= 3;
 }
 
 /**

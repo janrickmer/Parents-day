@@ -26,7 +26,7 @@
 // Cloud-Sicherung (kompletter Stand der Lehrkraft, im Browser mit ihrem Passwort verschlüsselt, js/core/cloud.js).
 // Adresse (syncId), Schlüssel und Tokens entstehen im Browser aus Passwort, Name und Geburtsdatum – ohne das Passwort
 // lässt sich eine Sicherung weder finden noch öffnen, überschreiben oder löschen. who ist ein Hashwert aus Name und
-// Geburtsdatum; gespeichert wird eine Sicherung unter SHA-256(who|syncId) – who selbst steht nicht in der Datenbank.
+// Geburtsdatum; gespeichert wird eine Sicherung (Tabelle backups) unter SHA-256(who|syncId) – who selbst steht nicht in der Datenbank.
 //   POST   /v1/sync/<syncId>/open          Sicherung auf einem Gerät öffnen: Bearer <token>, { who, device }
 //                                          → { found:false } oder { found:true, version, updatedAt, iv, ct, z }
 //                                          device: SHA-256 eines zufälligen Geräte-Geheimnisses – das Gerät darf
@@ -44,7 +44,7 @@
 // Löschen antworten bei jedem Fehler gleich (403) – ohne Passwort ist nicht zu erkennen, ob es eine Sicherung gibt.
 // Zum Zählen wird statt der IP-Adresse ein pseudonymer Hashwert gespeichert (HMAC mit IP_HASH_KEY bzw. täglich
 // neuem Zufallswert), nach spätestens 2 Tagen gelöscht. Sicherungen, die nach dem Anlegen nie geändert oder
-// abgerufen wurden, werden nach 30 Tagen gelöscht, alle anderen nach 400 Tagen ohne Nutzung.
+// abgerufen wurden, werden nach 30 Tagen gelöscht, alle anderen nach 400 Tagen ohne Änderung oder Abruf.
 
 const DEFAULT_ORIGINS = ['https://parentsday.janrickmer.de'];
 const ID_RE = /^[A-Za-z0-9_-]{32}$/;
@@ -87,13 +87,15 @@ function ensureSchema(db) {
         db.prepare('CREATE TABLE IF NOT EXISTS directory (dir_id TEXT PRIMARY KEY, box_id TEXT NOT NULL, updated_at INTEGER NOT NULL, body TEXT NOT NULL)'),
         db.prepare('CREATE INDEX IF NOT EXISTS idx_directory_updated ON directory (updated_at)'),
         db.prepare(
-          'CREATE TABLE IF NOT EXISTS cloud (id TEXT PRIMARY KEY, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, seen_at INTEGER NOT NULL, auth_hash TEXT NOT NULL, admin_hash TEXT NOT NULL, devices TEXT NOT NULL, iv TEXT NOT NULL, z INTEGER NOT NULL, chunks INTEGER NOT NULL, size INTEGER NOT NULL, writer TEXT NOT NULL)',
+          'CREATE TABLE IF NOT EXISTS backups (id TEXT PRIMARY KEY, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, seen_at INTEGER NOT NULL, auth_hash TEXT NOT NULL, admin_hash TEXT NOT NULL, devices TEXT NOT NULL, iv TEXT NOT NULL, z INTEGER NOT NULL, chunks INTEGER NOT NULL, size INTEGER NOT NULL, writer TEXT NOT NULL)',
         ),
-        db.prepare('CREATE INDEX IF NOT EXISTS idx_cloud_seen ON cloud (seen_at)'),
-        db.prepare('CREATE TABLE IF NOT EXISTS cloud_chunks (cloud_id TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (cloud_id, idx))'),
-        // Tabellen einer Vorabfassung der Cloud-Sicherung (nie im Einsatz) entfernen
+        db.prepare('CREATE INDEX IF NOT EXISTS idx_backups_seen ON backups (seen_at)'),
+        db.prepare('CREATE TABLE IF NOT EXISTS backup_chunks (backup_id TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (backup_id, idx))'),
+        // Tabellen der Vorabfassungen der Cloud-Sicherung entfernen (anderes Format, nicht mehr lesbar)
         db.prepare('DROP TABLE IF EXISTS sync_chunks'),
         db.prepare('DROP TABLE IF EXISTS sync'),
+        db.prepare('DROP TABLE IF EXISTS cloud_chunks'),
+        db.prepare('DROP TABLE IF EXISTS cloud'),
         db.prepare('CREATE TABLE IF NOT EXISTS cloud_limits (key TEXT PRIMARY KEY, win INTEGER NOT NULL, n INTEGER NOT NULL)'),
         db.prepare('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, day INTEGER NOT NULL)'),
       ])
@@ -228,8 +230,8 @@ async function removeExpired(db, now = Date.now()) {
   const [messages, directory, cloud] = await db.batch([
     db.prepare('DELETE FROM messages WHERE created_at < ?').bind(limit),
     db.prepare('DELETE FROM directory WHERE updated_at < ?').bind(limit),
-    db.prepare('DELETE FROM cloud WHERE seen_at < ? OR (version = 1 AND seen_at < ?)').bind(syncLimit, now - UNUSED_RETENTION_MS),
-    db.prepare('DELETE FROM cloud_chunks WHERE cloud_id NOT IN (SELECT id FROM cloud)'),
+    db.prepare('DELETE FROM backups WHERE seen_at < ? OR (version = 1 AND seen_at = updated_at AND seen_at < ?)').bind(syncLimit, now - UNUSED_RETENTION_MS),
+    db.prepare('DELETE FROM backup_chunks WHERE backup_id NOT IN (SELECT id FROM backups)'),
     db.prepare('DELETE FROM cloud_limits WHERE win < ?').bind(now - LIMIT_RETENTION_MS),
   ]);
   return { messages: Number(messages?.meta?.changes ?? 0), directory: Number(directory?.meta?.changes ?? 0), sync: Number(cloud?.meta?.changes ?? 0) };
@@ -393,7 +395,7 @@ async function cloudRowId(who, syncId) {
 }
 
 function getCloudRow(db, id) {
-  return db.prepare('SELECT version, updated_at, seen_at, auth_hash, admin_hash, devices, chunks FROM cloud WHERE id = ?').bind(id).first();
+  return db.prepare('SELECT version, updated_at, seen_at, auth_hash, admin_hash, devices, chunks FROM backups WHERE id = ?').bind(id).first();
 }
 
 function parseDevices(text) {
@@ -441,20 +443,20 @@ function chunkStatements(db, id, ct, writer) {
     statements.push(
       db
         .prepare(
-          'INSERT INTO cloud_chunks (cloud_id, idx, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM cloud WHERE id = ? AND writer = ?) ON CONFLICT(cloud_id, idx) DO UPDATE SET data = excluded.data',
+          'INSERT INTO backup_chunks (backup_id, idx, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM backups WHERE id = ? AND writer = ?) ON CONFLICT(backup_id, idx) DO UPDATE SET data = excluded.data',
         )
         .bind(id, count, ct.slice(i, i + SYNC_CHUNK_CHARS), id, writer),
     );
   }
-  statements.push(db.prepare('DELETE FROM cloud_chunks WHERE cloud_id = ? AND idx >= ? AND EXISTS (SELECT 1 FROM cloud WHERE id = ? AND writer = ?)').bind(id, count, id, writer));
+  statements.push(db.prepare('DELETE FROM backup_chunks WHERE backup_id = ? AND idx >= ? AND EXISTS (SELECT 1 FROM backups WHERE id = ? AND writer = ?)').bind(id, count, id, writer));
   return { statements, count };
 }
 
 /** Zeile und Stücke in einem Zug lesen (gehören sicher zum selben Stand). */
 async function readCloudData(db, id) {
   const [head, parts] = await db.batch([
-    db.prepare('SELECT version, updated_at, iv, z, chunks FROM cloud WHERE id = ?').bind(id),
-    db.prepare('SELECT idx, data FROM cloud_chunks WHERE cloud_id = ? ORDER BY idx').bind(id),
+    db.prepare('SELECT version, updated_at, iv, z, chunks FROM backups WHERE id = ?').bind(id),
+    db.prepare('SELECT idx, data FROM backup_chunks WHERE backup_id = ? ORDER BY idx').bind(id),
   ]);
   const current = head?.results?.[0];
   if (!current) return null;
@@ -473,10 +475,10 @@ async function readCloudData(db, id) {
 /** Trägt ein Gerät ein (die zuletzt geöffneten bleiben). Bedingt geschrieben – gleichzeitiges Öffnen verliert kein Gerät. */
 async function addDevice(db, id, deviceHash) {
   for (let i = 0; i < 5; i++) {
-    const row = await db.prepare('SELECT devices FROM cloud WHERE id = ?').bind(id).first();
+    const row = await db.prepare('SELECT devices FROM backups WHERE id = ?').bind(id).first();
     if (!row) return;
     const devices = [...parseDevices(row.devices).filter((d) => d !== deviceHash), deviceHash].slice(-SYNC_MAX_DEVICES);
-    const res = await db.prepare('UPDATE cloud SET devices = ?, seen_at = ? WHERE id = ? AND devices = ?').bind(JSON.stringify(devices), Date.now(), id, row.devices).run();
+    const res = await db.prepare('UPDATE backups SET devices = ?, seen_at = ? WHERE id = ? AND devices = ?').bind(JSON.stringify(devices), Date.now(), id, row.devices).run();
     if (Number(res?.meta?.changes)) return;
   }
 }
@@ -501,8 +503,11 @@ async function getSync(request, env, db, syncId) {
   if (!auth) return json(request, env, 403, { error: 'forbidden' });
   const { id, row } = auth;
   const now = Date.now();
-  // Abruf zählt als Nutzung (für das Aufräumen) – höchstens einmal am Tag geschrieben.
-  if (now - Number(row.seen_at) > DAY_MS) await db.prepare('UPDATE cloud SET seen_at = ? WHERE id = ?').bind(now, id).run();
+  // Abruf zählt als Nutzung (für das Aufräumen) – höchstens einmal am Tag geschrieben; der erste Abruf nach dem
+  // Anlegen immer (sonst gälte die Sicherung als „nie genutzt“).
+  if (now - Number(row.seen_at) > DAY_MS || Number(row.seen_at) === Number(row.updated_at)) {
+    await db.prepare('UPDATE backups SET seen_at = ? WHERE id = ?').bind(now === Number(row.updated_at) ? now + 1 : now, id).run();
+  }
   const since = new URL(request.url).searchParams.get('since');
   if (since !== null && /^\d{1,15}$/.test(since) && Number(since) === Number(row.version)) {
     return json(request, env, 200, { found: true, version: Number(row.version), updatedAt: Number(row.updated_at), unchanged: true });
@@ -529,7 +534,7 @@ async function createSync(request, env, db, syncId, body) {
   const [creates, chars, total] = await db.batch([
     countStatement(db, `c|${ip}`, day),
     countStatement(db, `cb|${ip}`, day, body.ct.length),
-    db.prepare('SELECT COALESCE(SUM(size), 0) AS n FROM cloud'),
+    db.prepare('SELECT COALESCE(SUM(size), 0) AS n FROM backups'),
   ]);
   if (Number(creates?.results?.[0]?.n ?? Infinity) > CREATES_PER_DAY_PER_IP || Number(chars?.results?.[0]?.n ?? Infinity) > CREATE_CHARS_PER_DAY_PER_IP) {
     return json(request, env, 429, { error: 'too-many-creates', retryAfter: secondsUntil(day + DAY_MS) });
@@ -547,7 +552,7 @@ async function createSync(request, env, db, syncId, body) {
   const [inserted] = await db.batch([
     db
       .prepare(
-        'INSERT INTO cloud (id, version, updated_at, seen_at, auth_hash, admin_hash, devices, iv, z, chunks, size, writer) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING',
+        'INSERT INTO backups (id, version, updated_at, seen_at, auth_hash, admin_hash, devices, iv, z, chunks, size, writer) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING',
       )
       .bind(id, now, now, body.authHash, body.adminHash, JSON.stringify([body.device]), body.iv, body.z, count, body.ct.length, writer),
     ...statements,
@@ -573,7 +578,7 @@ async function putSync(request, env, db, syncId) {
   const { statements, count } = chunkStatements(db, id, body.ct, writer);
   const [updated] = await db.batch([
     db
-      .prepare('UPDATE cloud SET version = ?, updated_at = ?, seen_at = ?, iv = ?, z = ?, chunks = ?, size = ?, writer = ? WHERE id = ? AND version = ?')
+      .prepare('UPDATE backups SET version = ?, updated_at = ?, seen_at = ?, iv = ?, z = ?, chunks = ?, size = ?, writer = ? WHERE id = ? AND version = ?')
       .bind(version, now, now, body.iv, body.z, count, body.ct.length, writer, id, row.version),
     ...statements,
   ]);
@@ -585,7 +590,7 @@ async function putSync(request, env, db, syncId) {
 async function deleteSync(request, env, db, syncId) {
   const auth = await authorizedRow(request, db, syncId, { admin: true });
   if (!auth) return json(request, env, 403, { error: 'forbidden' });
-  await db.batch([db.prepare('DELETE FROM cloud WHERE id = ?').bind(auth.id), db.prepare('DELETE FROM cloud_chunks WHERE cloud_id = ?').bind(auth.id)]);
+  await db.batch([db.prepare('DELETE FROM backups WHERE id = ?').bind(auth.id), db.prepare('DELETE FROM backup_chunks WHERE backup_id = ?').bind(auth.id)]);
   return json(request, env, 200, { deleted: true });
 }
 
@@ -596,7 +601,7 @@ export default {
       const url = new URL(request.url);
       const parts = url.pathname.split('/').filter(Boolean);
       if (parts[0] !== 'v1') return json(request, env, 404, { error: 'not-found' });
-      if (parts[1] === 'health' && parts.length === 2 && request.method === 'GET') return json(request, env, 200, { ok: true, service: 'ParentsDay-Briefkasten', version: 3, sync: 2 });
+      if (parts[1] === 'health' && parts.length === 2 && request.method === 'GET') return json(request, env, 200, { ok: true, service: 'ParentsDay-Briefkasten', version: 4, sync: 3 });
       if (!env.DB) return json(request, env, 500, { error: 'no-database' });
       await ensureSchema(env.DB);
 
