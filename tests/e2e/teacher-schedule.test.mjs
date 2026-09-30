@@ -624,6 +624,8 @@ test('Terminieren: Popup-Blocker, Doppelklick und lange Übersicht im PDF', asyn
     await page.evaluate(() => {
       window.open = () => null;
     });
+    // Nach dem Erstellen ignoriert der Knopf eine Sekunde lang weitere Klicks (Doppelklick-Schutz).
+    await page.waitForTimeout(1200);
     await captureDownload(page, () => page.click(tid('schedule-finalize')));
     await page.getByText('Öffnen Sie die Datei zum Drucken aus Ihrem Download-Ordner.', { exact: false }).waitFor();
     assert.deepEqual(errors, []);
