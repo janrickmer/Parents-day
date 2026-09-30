@@ -601,6 +601,9 @@ test('Terminieren: Popup-Blocker, Doppelklick und lange Übersicht im PDF', asyn
     });
     const dl = await captureDownload(page, () => page.dblclick(tid('schedule-finalize')));
     await page.locator('.sched-messages .alert-success').waitFor();
+    // Auf schnellen Rechnern ist die PDF fertig, bevor der zweite Klick des Doppelklicks ankommt:
+    // diesen zweiten Klick (detail 2) gezielt nach dem Erstellen auslösen.
+    await page.$eval(tid('schedule-finalize'), (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
     await page.waitForTimeout(800);
     assert.equal(downloads, 1);
     assert.equal(popups.length, 1);

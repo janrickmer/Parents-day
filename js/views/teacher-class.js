@@ -171,6 +171,7 @@ export default function render(ctx) {
   let feedbackKind = '';
   let lastDeleteAt = 0;
   let codesCreatedAt = 0;
+  let lettersCreatedAt = 0;
   const refs = new Map(); // Zeilen-ID → { tr, last, first, codeCell, availCell, del }
 
   const expectedCode = (row) => studentCode(grade, letter, state.teacher.teacherCode, row.firstName, row.lastName);
@@ -691,12 +692,13 @@ export default function render(ctx) {
 
   // ---------- Hauptknopf ----------
 
-  function onPrimary() {
-    if (busy) return;
+  function onPrimary(e) {
+    // Zweiter Klick eines Doppelklicks: nichts doppelt ausführen
+    if (busy || e?.detail > 1) return;
     flushSave();
     if (isReady()) {
-      // Doppelklick auf „Alle Lernenden erfolgreich eingetragen“ soll nicht sofort das PDF starten
-      if (Date.now() - codesCreatedAt < DOUBLE_CLICK_MS) return;
+      // Doppelklick auf „Alle Lernenden erfolgreich eingetragen“ bzw. kurz nach dem letzten PDF: kein (weiteres) PDF
+      if (Date.now() - codesCreatedAt < DOUBLE_CLICK_MS || Date.now() - lettersCreatedAt < DOUBLE_CLICK_MS) return;
       createLetters();
     } else {
       generateCodes();
@@ -826,6 +828,7 @@ export default function render(ctx) {
       showFeedback(alertBox('error', h('strong', {}, 'Die Elternbriefe konnten nicht erstellt werden. '), friendlyError(err)), 'error');
     } finally {
       busy = false;
+      lettersCreatedAt = Date.now();
       primaryBtn.disabled = false;
       updateUi();
     }

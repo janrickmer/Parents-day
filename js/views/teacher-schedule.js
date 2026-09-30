@@ -202,6 +202,7 @@ export default function render(ctx) {
   let suppressClick = false; // Klick, der direkt aus einem Ziehen entsteht, nicht als Auswahl werten
   let suppressTimer = 0;
   let finalizing = false;
+  let finalizedAt = 0;
   let detailRefs = null;
   const trackRefs = new Map(); // Datum → { track, bands, day }
 
@@ -1273,8 +1274,10 @@ export default function render(ctx) {
 
   // ---------- Termine festlegen, speichern und drucken ----------
 
-  async function onFinalize() {
-    if (finalizing) return;
+  async function onFinalize(e) {
+    // Zweiter Klick eines Doppelklicks oder Klick kurz nach dem Erstellen: nicht noch eine PDF erzeugen
+    // (bei kleinen Klassen ist die PDF schneller fertig als der zweite Klick eines Doppelklicks).
+    if (finalizing || e?.detail > 1 || Date.now() - finalizedAt < 1000) return;
     mount(messages);
     const count = cls.students.filter((s) => s.appointment).length;
     if (count === 0) {
@@ -1320,6 +1323,7 @@ export default function render(ctx) {
       mount(messages, alertBox('error', h('strong', {}, 'Die PDF-Datei konnte nicht erstellt werden. '), friendlyError(err)));
     } finally {
       finalizing = false;
+      finalizedAt = Date.now();
       finalizeBtn.disabled = false;
       mount(finalizeBtn, FINALIZE_LABEL);
     }

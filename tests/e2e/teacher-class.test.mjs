@@ -732,3 +732,27 @@ test('Hinweise (Toasts) lassen sich schließen und blockieren keine Klicks daneb
     await browser.close();
   }
 });
+
+test('Doppelklick auf „Elternschreiben für diese Klasse erstellen“ erzeugt genau eine PDF', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    await seedTeacher(page, server.url, sampleState({ classes: [sampleClass()] }));
+    await page.goto(`${server.url}#/lehrkraft/klasse/5a`);
+    await page.locator(tid('primary-action')).waitFor();
+    assert.match(await page.textContent(tid('primary-action')), /Elternschreiben für diese Klasse erstellen/);
+    let downloads = 0;
+    page.on('download', (d) => {
+      if (d.suggestedFilename() === 'ParentsDay Elternbriefe Klasse 5a.pdf') downloads++;
+    });
+    await page.dblclick(tid('primary-action'));
+    await page.locator('.alert-success', { hasText: 'Die Elternbriefe wurden erstellt' }).waitFor();
+    // Auf schnellen Rechnern ist die PDF fertig, bevor der zweite Klick des Doppelklicks ankommt:
+    // diesen zweiten Klick (detail 2) gezielt nach dem Erstellen auslösen.
+    await page.$eval(tid('primary-action'), (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
+    await page.waitForTimeout(1200);
+    assert.equal(downloads, 1);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
