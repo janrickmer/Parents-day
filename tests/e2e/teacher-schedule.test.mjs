@@ -586,10 +586,19 @@ test('Terminieren: Popup-Blocker, Doppelklick und lange Übersicht im PDF', asyn
     assert.match(await page.textContent('.sched-pool'), /Alle Lernenden sind terminiert\./);
 
     // Doppelklick: nur ein Download und ein Tab
+    // Gezählt werden nur Downloads mit dem Dateinamen der App. Der Drucken-Tab lädt im Test-Browser
+    // (ohne PDF-Betrachter) die Blob-Datei unter einem zufälligen Namen herunter – je nach Zeitpunkt
+    // wird dieser Download der Hauptseite oder dem Tab zugerechnet.
     const popups = [];
-    context.on('page', (p) => popups.push(p));
     let downloads = 0;
-    page.on('download', () => downloads++);
+    const count = (d) => {
+      if (d.suggestedFilename() === 'ParentsDay Termine Klasse 5a.pdf') downloads++;
+    };
+    page.on('download', count);
+    context.on('page', (p) => {
+      popups.push(p);
+      p.on('download', count);
+    });
     const dl = await captureDownload(page, () => page.dblclick(tid('schedule-finalize')));
     await page.locator('.sched-messages .alert-success').waitFor();
     await page.waitForTimeout(800);
