@@ -1,1 +1,308 @@
-/* teacher-class */
+/* Klassenansicht mit Tabelle der Lernenden (Präfix .tc-) */
+
+.tc-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* [hidden] muss auch bei Bausteinen mit eigener display-Angabe gelten */
+.tc-page [hidden] {
+  display: none !important;
+}
+.tc-page > .back-link {
+  margin-bottom: -8px;
+  align-self: flex-start;
+}
+.tc-page > .page-header {
+  margin-bottom: 4px;
+  align-items: flex-start;
+}
+
+/* ---------- Kopf ---------- */
+
+.tc-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px 12px;
+}
+.tc-schedule {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.tc-schedule-hint {
+  margin: 0;
+  max-width: 320px;
+  text-align: right;
+}
+.tc-btn-danger {
+  color: var(--c-danger);
+}
+.tc-btn-danger:hover:not(:disabled) {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+@media (max-width: 720px) {
+  .tc-header-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    width: 100%;
+  }
+  .tc-schedule {
+    align-items: stretch;
+  }
+  .tc-schedule-hint {
+    text-align: left;
+    max-width: none;
+  }
+}
+
+/* ---------- Tabelle ---------- */
+
+.tc-intro {
+  max-width: 860px;
+  color: var(--c-muted);
+}
+.tc-table-wrap {
+  margin-top: 12px;
+}
+.tc-table td {
+  vertical-align: top;
+}
+.tc-table .tc-col-num {
+  width: 56px;
+}
+.tc-table .tc-col-del {
+  width: 52px;
+}
+.tc-num {
+  padding-top: 17px;
+  font-weight: 700;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+}
+.tc-num-label {
+  display: none;
+}
+.tc-name {
+  min-width: 170px;
+}
+.tc-input {
+  min-height: 40px;
+  padding: 7px 10px;
+}
+.tc-code {
+  padding-top: 16px;
+  min-width: 150px;
+  max-width: 250px;
+}
+.tc-code-value {
+  display: inline-block;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.tc-code-empty {
+  color: var(--c-muted);
+}
+.tc-with-avail .tc-code {
+  max-width: 210px;
+}
+.tc-avail {
+  padding-top: 16px;
+  min-width: 240px;
+  font-size: 0.9rem;
+}
+.tc-avail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tc-avail-day {
+  font-weight: 600;
+}
+.tc-avail-none {
+  color: var(--c-muted);
+}
+.tc-avail-received {
+  margin-top: 2px;
+  font-size: 0.8rem;
+}
+.tc-avail-appt {
+  margin-top: 6px;
+}
+.tc-pending {
+  white-space: normal;
+}
+.tc-del-cell {
+  padding-top: 12px;
+  text-align: right;
+}
+.tc-del {
+  color: var(--c-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+.tc-del:hover:not(:disabled) {
+  color: var(--c-danger);
+  background: var(--c-danger-soft);
+}
+.tc-row-error td {
+  background: var(--c-danger-soft);
+}
+
+.tc-below {
+  margin-top: 12px;
+}
+.tc-add-plus {
+  font-size: 1.3rem;
+  line-height: 1;
+  margin-top: -2px;
+}
+.tc-feedback:not(:empty) {
+  margin-top: 16px;
+}
+.tc-feedback p {
+  margin-bottom: 4px;
+}
+.tc-problems {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+
+/* ---------- Hauptknopf ---------- */
+
+.tc-primary {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--c-border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+.tc-primary-btn {
+  white-space: normal;
+  text-align: center;
+}
+.tc-primary-hint {
+  margin: 0;
+  max-width: 460px;
+}
+
+/* ---------- Rückmeldungen ---------- */
+
+.tc-resp-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+.tc-resp-count {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.tc-resp-bar {
+  flex: 1 1 180px;
+  max-width: 320px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  overflow: hidden;
+}
+.tc-resp-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--c-available);
+  transition: width 0.3s;
+}
+.tc-responses > p {
+  max-width: 860px;
+}
+
+/* ---------- Smartphone: jede Zeile als kleine Karte ---------- */
+
+@media (max-width: 640px) {
+  .tc-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .tc-table,
+  .tc-table tbody {
+    display: block;
+  }
+  .tc-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px 10px;
+    padding: 12px;
+    border-bottom: 1px solid var(--c-border);
+  }
+  .tc-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .tc-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    max-width: none;
+  }
+  .tc-num {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+    color: var(--c-text);
+  }
+  .tc-num-label {
+    display: inline;
+  }
+  .tc-del-cell {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    padding: 0;
+  }
+  .tc-code,
+  .tc-avail {
+    grid-column: 1 / -1;
+  }
+  .tc-with-avail .tc-code {
+    max-width: none;
+  }
+  .tc-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--c-muted);
+  }
+  .tc-row-error {
+    background: var(--c-danger-soft);
+  }
+  .tc-row-error td {
+    background: transparent;
+  }
+  .tc-code-value {
+    font-size: 0.8rem;
+  }
+  .tc-add,
+  .tc-primary-btn {
+    width: 100%;
+    white-space: normal;
+  }
+  .tc-add {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}

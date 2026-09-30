@@ -88,3 +88,23 @@ test('Datumsprüfung', () => {
   assert.ok(!isValidIsoDate('2023-02-29'));
   assert.ok(!isValidIsoDate('15.03.1990'));
 });
+
+test('E-Mail-Prüfung schließt Zeichen aus, die mailto-Links zerstören', async () => {
+  const { isValidEmail } = await import('../../js/core/codes.js');
+  assert.ok(isValidEmail('anna.meier@schule.de'));
+  assert.ok(isValidEmail(' anna.meier+eltern@gs-sued.example '));
+  assert.ok(!isValidEmail('anna@schule'));
+  assert.ok(!isValidEmail('anna?x@schule.de'));
+  assert.ok(!isValidEmail('anna@schule.de#x'));
+  assert.ok(!isValidEmail('anna..meier@schule.de'));
+  assert.ok(!isValidEmail('anna meier@schule.de'));
+});
+
+test('Gleicher Lehrkräftecode, aber andere Person wird erkannt', async () => {
+  const { isSameTeacher } = await import('../../js/core/codes.js');
+  const stored = { firstName: 'Anna', lastName: 'Meier', birthDate: '1990-03-15' };
+  assert.equal(teacherCode('Anna', 'Meier', '1990-03-15'), teacherCode('Andreas', 'Müller', '1990-03-15'));
+  assert.ok(isSameTeacher(stored, 'anna', 'MEIER', '1990-03-15'));
+  assert.ok(!isSameTeacher(stored, 'Andreas', 'Müller', '1990-03-15'));
+  assert.ok(!isSameTeacher(null, 'Anna', 'Meier', '1990-03-15'));
+});

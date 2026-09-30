@@ -154,6 +154,28 @@ export function canonicalStudentCode(parsed) {
   return `${parsed.classId}${parsed.teacherCode}${parsed.nameCode}`;
 }
 
+// Keine Zeichen, die einen mailto:-Link zerteilen würden (? # & , ; …).
+const EMAIL_RE = /^[^\s@,;:<>()[\]\\"?#&/]+@[^\s@,;:<>()[\]\\"?#&/]+\.[^\s@,;:<>()[\]\\"?#&/.]{2,}$/;
+
+/** Prüft eine E-Mail-Adresse (auch auf Tauglichkeit für mailto:-Links). */
+export function isValidEmail(value) {
+  const email = String(value ?? '').trim();
+  return email.length <= 254 && !email.includes('..') && EMAIL_RE.test(email);
+}
+
+/**
+ * Prüft, ob gespeicherte Lehrkraft-Daten zur selben Person gehören. Der Lehrkräftecode allein ist nicht
+ * eindeutig (gleiche Anfangsbuchstaben und gleiches Geburtsdatum ergeben denselben Code).
+ */
+export function isSameTeacher(stored, firstName, lastName, birthDate) {
+  if (!stored) return false;
+  return (
+    transliterate(stored.firstName) === transliterate(firstName) &&
+    transliterate(stored.lastName) === transliterate(lastName) &&
+    String(stored.birthDate) === String(birthDate)
+  );
+}
+
 /** Prüft, ob ein Name für den Zahlencode verwendbar ist (mindestens ein Buchstabe A–Z nach Umschreibung). */
 export function hasCodeLetters(name) {
   return transliterate(name).length > 0;

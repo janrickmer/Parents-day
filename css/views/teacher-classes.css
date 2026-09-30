@@ -1,1 +1,222 @@
-/* teacher-classes */
+/* Klassenübersicht (Präfix .tcl-) */
+
+.tcl-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+/* [hidden] muss auch bei Bausteinen mit eigener display-Angabe gelten */
+.tcl-page [hidden] {
+  display: none !important;
+}
+.tcl-page > .page-header {
+  margin-bottom: 0;
+}
+.tcl-page .page-header .subtitle {
+  max-width: 720px;
+}
+
+/* ---------- Oben: neue Klasse + Elternsprechtag ---------- */
+
+.tcl-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 880px) {
+  .tcl-top {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tcl-create > p {
+  margin-bottom: 14px;
+}
+.tcl-create-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  align-items: end;
+}
+.tcl-create-btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-width: 200px;
+}
+@media (max-width: 480px) {
+  .tcl-create-form {
+    grid-template-columns: 1fr;
+  }
+  .tcl-create-btn {
+    justify-self: stretch;
+  }
+}
+.tcl-create-msg:not(:empty) {
+  margin-top: 14px;
+}
+
+.tcl-event {
+  background: var(--c-surface-2);
+  box-shadow: none;
+}
+.tcl-event-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.tcl-event-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.tcl-facts {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.tcl-fact {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 12px;
+}
+.tcl-fact dt {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--c-muted);
+  padding-top: 1px;
+}
+.tcl-fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.tcl-days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 600;
+}
+@media (max-width: 420px) {
+  .tcl-fact {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+/* ---------- Kacheln ---------- */
+
+.tcl-classes-title {
+  margin-bottom: 12px;
+}
+.tcl-tiles {
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+.tcl-tile {
+  min-height: 176px;
+  border-top: 4px solid var(--c-accent-border);
+}
+.tcl-tile-ready {
+  border-top-color: var(--c-success);
+}
+.tcl-tile:focus-visible {
+  border-color: var(--c-primary);
+}
+.tcl-tile-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-muted);
+}
+.tcl-tile-name {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--c-primary);
+  margin-bottom: 2px;
+}
+.tcl-tile-count {
+  font-weight: 600;
+}
+.tcl-tile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tcl-tile-status {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.tcl-tile-status::before {
+  content: '';
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.tcl-tile-status::after {
+  content: '→';
+  content: '→' / '';
+  margin-left: auto;
+  color: var(--c-muted);
+  transition: transform 0.12s;
+}
+.tcl-tile:hover .tcl-tile-status::after {
+  transform: translateX(3px);
+  color: var(--c-primary);
+}
+.tcl-status-todo {
+  color: var(--c-warning);
+}
+.tcl-status-ready {
+  color: var(--c-success);
+}
+.tcl-tile-new {
+  animation: tcl-highlight 1.6s ease-out;
+}
+@keyframes tcl-highlight {
+  0%,
+  40% {
+    box-shadow: 0 0 0 5px rgba(242, 194, 0, 0.55), var(--shadow);
+  }
+  100% {
+    box-shadow: var(--shadow);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tcl-tile-new {
+    animation: none;
+  }
+  .tcl-tile,
+  .tcl-tile-status::after {
+    transition: none;
+  }
+}
+
+.tcl-empty strong {
+  display: block;
+  color: var(--c-text);
+  margin-bottom: 4px;
+}
+.tcl-empty p {
+  margin: 0;
+}
+
+/* ---------- Rückmeldungen ---------- */
+
+.tcl-import > p {
+  max-width: 820px;
+}

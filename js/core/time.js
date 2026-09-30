@@ -16,9 +16,10 @@ export function toMinutes(hhmm) {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
-/** 845 → "14:05" */
+/** 845 → "14:05"; genau 1440 (Tagesende) → "24:00" */
 export function fromMinutes(minutes) {
   const m = Math.max(0, Math.round(minutes));
+  if (m === 1440) return '24:00';
   return `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
 }
 

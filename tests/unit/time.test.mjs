@@ -36,3 +36,8 @@ test('Datumsformat', () => {
   assert.equal(weekday('2026-11-12'), 'Donnerstag');
   assert.equal(formatRanges([['14:00', '15:30'], ['16:00', '17:00']]), '14:00–15:30, 16:00–17:00 Uhr');
 });
+
+test('Tagesende 24:00 bleibt 24:00', () => {
+  assert.equal(fromMinutes(1440), '24:00');
+  assert.deepEqual(slotsToRanges([1430], 10), [['23:50', '24:00']]);
+});

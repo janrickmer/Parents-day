@@ -1,1 +1,411 @@
-/* parent */
+/* Elternzugang: Anmeldung, freie Zeiten markieren, Fertig-Seite.
+   Zuerst für Smartphones gestaltet (ab 320 px), Desktop über min-width-Abfragen. */
+
+.parent-page {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.parent-page .page-header {
+  margin-bottom: 0;
+}
+.parent-page .back-link {
+  margin-bottom: -8px;
+  align-self: flex-start;
+}
+/* Lange Beschriftungen dürfen umbrechen, damit nichts über den Rand ragt */
+.parent-page .btn {
+  white-space: normal;
+  text-align: center;
+}
+.parent-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.parent-actions .btn {
+  width: 100%;
+}
+@media (min-width: 600px) {
+  .parent-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .parent-actions .btn {
+    width: auto;
+  }
+}
+
+/* ---------- Anmeldung ---------- */
+
+.parent-event {
+  border-left: 5px solid var(--c-primary);
+  padding: 14px 16px;
+}
+.parent-event p {
+  margin: 0;
+}
+.parent-event-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+.parent-event-class {
+  white-space: nowrap;
+}
+.parent-event-school {
+  margin-top: 2px !important;
+  font-size: 0.95rem;
+}
+.parent-event-days {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.95rem;
+}
+.parent-event-days li::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  margin-right: 8px;
+  vertical-align: 1px;
+}
+.parent-login h2,
+.parent-loggedin h2 {
+  margin-bottom: 0;
+}
+.parent-login > p {
+  margin: 0;
+}
+.parent-code-input {
+  font-family: var(--font-mono) !important;
+  letter-spacing: 0.02em;
+}
+.parent-login-error:empty {
+  display: none;
+}
+.parent-other-key {
+  align-self: center;
+  color: var(--c-muted);
+}
+.parent-loggedin > p {
+  margin: 0;
+}
+
+/* ---------- Übersicht ---------- */
+
+.parent-overview h2 {
+  margin-bottom: 10px;
+}
+.parent-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+.parent-fact {
+  min-width: 0;
+}
+.parent-fact-wide {
+  grid-column: 1 / -1;
+}
+.parent-facts dt {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--c-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.parent-facts dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.parent-facts-days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.parent-facts-days li + li {
+  margin-top: 4px;
+}
+@media (min-width: 600px) {
+  .parent-facts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.parent-instruction {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.parent-legend {
+  padding: 0 4px;
+}
+.parent-swatch-free {
+  background: var(--c-available);
+}
+.parent-swatch-busy {
+  background: var(--c-surface);
+  border: 2px solid var(--c-border-strong);
+}
+
+/* ---------- Tage mit Zeitslots ---------- */
+
+.parent-day {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.parent-day-head h2 {
+  margin: 0;
+}
+.parent-day-head p {
+  margin: 2px 0 0;
+}
+.parent-day-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (min-width: 600px) {
+  .parent-day-tools {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
+
+.parent-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+/* Spaltenzahl so, dass jede Zeile an einer vollen Stunde beginnt (vom Skript gesetzt) */
+.parent-slots-aligned {
+  grid-template-columns: repeat(var(--parent-cols-sm), minmax(0, 1fr));
+}
+@media (min-width: 600px) {
+  .parent-slots {
+    gap: 8px;
+  }
+  .parent-slots-aligned {
+    grid-template-columns: repeat(var(--parent-cols-lg), minmax(0, 1fr));
+  }
+}
+
+/* Zweizeilig: Beginn groß, Ende klein darunter – passt auch auf schmale Smartphones */
+.parent-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  padding: 5px 4px;
+  border: 2px solid var(--c-border-strong);
+  border-radius: 8px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.1s, border-color 0.1s;
+}
+.parent-slot-start {
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+.parent-slot-end {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--c-muted);
+}
+/* Markiert: grün mit Haken; dunkle Schrift für guten Kontrast */
+.parent-slot[aria-pressed='true'] {
+  background: var(--c-available);
+  border-color: var(--c-success);
+}
+.parent-slot[aria-pressed='true'] .parent-slot-end {
+  color: inherit;
+  font-weight: 600;
+}
+.parent-slot[aria-pressed='true']::after {
+  content: '✓';
+  position: absolute;
+  top: 1px;
+  right: 5px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+@media (hover: hover) {
+  .parent-slot:hover {
+    border-color: var(--c-available);
+    background: var(--c-available-soft);
+  }
+  .parent-slot[aria-pressed='true']:hover {
+    border-color: var(--c-text);
+    background: var(--c-available);
+  }
+}
+.parent-slot:focus-visible {
+  box-shadow: var(--focus);
+  border-color: var(--c-primary);
+}
+
+.parent-day-summary {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-small);
+  border-left: 4px solid var(--c-available);
+  background: var(--c-available-soft);
+  color: var(--c-text);
+  font-weight: 700;
+}
+.parent-day-summary-empty {
+  border-left-color: var(--c-border-strong);
+  background: var(--c-surface-2);
+  color: var(--c-muted);
+  font-weight: 500;
+}
+
+/* ---------- Absenden ---------- */
+
+.parent-submit-card h2 {
+  margin: 0;
+}
+.parent-submit-hint {
+  margin: 0;
+  color: var(--c-text);
+  font-weight: 600;
+}
+.parent-submit-hint-ok {
+  color: var(--c-muted);
+  font-weight: 400;
+}
+.parent-submit {
+  font-size: 1.2rem;
+}
+
+/* ---------- Fertig ---------- */
+
+.parent-done-hero {
+  text-align: center;
+  padding: 0;
+}
+.parent-done-hero h1 {
+  margin-bottom: 4px;
+}
+.parent-done-hero .subtitle {
+  color: var(--c-muted);
+  margin: 0 auto;
+  max-width: 540px;
+}
+.parent-done-check {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--c-available);
+  color: #fff;
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+.parent-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* Nummer und Überschrift in einer Zeile; der Inhalt nutzt am Smartphone die volle Breite */
+.parent-step {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.parent-step-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.parent-step-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.parent-step-body {
+  min-width: 0;
+}
+.parent-step-body p {
+  margin: 0;
+}
+.parent-step-num {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--c-accent-soft);
+  border: 2px solid var(--c-accent-border);
+  font-weight: 800;
+  color: #6b5300;
+}
+@media (min-width: 600px) {
+  .parent-done-hero {
+    padding-top: 8px;
+  }
+  .parent-done-check {
+    width: 56px;
+    height: 56px;
+    margin-bottom: 10px;
+    font-size: 1.8rem;
+  }
+  .parent-step-body {
+    padding-left: 46px;
+  }
+}
+/* Wenig Innenabstand, damit die Beschriftung am Smartphone in eine Zeile passt */
+.parent-mail-btn {
+  padding-left: 8px;
+  padding-right: 8px;
+  font-size: 1rem;
+}
+@media (min-width: 600px) {
+  .parent-mail-btn {
+    padding-left: 24px;
+    padding-right: 24px;
+    font-size: 1.1rem;
+  }
+}
+.parent-filename,
+.parent-email {
+  overflow-wrap: anywhere;
+}
+.parent-done-times {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.parent-done-summary h2 {
+  font-size: 1.1rem;
+}
+.parent-done-links {
+  justify-content: space-between;
+}

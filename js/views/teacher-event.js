@@ -1,7 +1,782 @@
-// PLATZHALTER – wird durch die eigentliche Implementierung ersetzt.
-import { h, mount } from '../core/ui.js';
+// Elternsprechtag erstellen (mode 'create') und „Weitere Einstellungen“ (mode 'settings'):
+// Tage im Kalender wählen, Anfangs- und Endzeit je Tag, Adresse der Schule, Standardlänge eines
+// Terminslots und E-Mail-Adresse für Rückmeldungen. In den Einstellungen zusätzlich: Hinweis auf
+// bereits erstellte Elternbriefe, Profil (nur lesen) und „Alle Daten in diesem Browser löschen“.
 
-export default function render({ root, setTitle }) {
-  setTitle('In Arbeit');
-  mount(root, h('div', { class: 'card' }, h('h1', {}, 'Diese Seite (teacher-event) ist noch in Arbeit.')));
+import { h, mount, toast, confirmDialog, alertBox, plural } from '../core/ui.js';
+import { updateState, getCurrentState, deleteTeacherState, clearSession } from '../core/storage.js';
+import { downloadBackup } from '../core/backup.js';
+import { toMinutes, fromMinutes, slotStarts, formatDate, formatDateWithWeekday, todayIso } from '../core/time.js';
+import { createCalendarPicker } from '../components/calendar-picker.js';
+import { isValidEmail } from '../core/codes.js';
+
+const MAX_DAYS = 8; // Grenze des Termin-Schlüssels (siehe core/transport.js)
+const DEFAULT_START = '14:00';
+const DEFAULT_END = '18:00';
+const DEFAULT_SLOT = 10;
+const SLOT_MIN = 5;
+const SLOT_MAX = 120;
+// Die Adresse steht im Link/QR-Code des Elternbriefs. Längere Texte machen den QR-Code
+// unlesbar (ab ca. 1300 Zeichen lässt er sich gar nicht mehr erzeugen).
+const ADDRESS_MAX_CHARS = 200;
+const ADDRESS_MAX_LINES = 6;
+const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DRAFT_PREFIX = 'parentsday.eventDraft.';
+
+// ---------- Entwurf und Prüfung ----------
+
+function draftFromState(state) {
+  const ev = state.event;
+  return {
+    days: (ev?.days || []).map((d) => ({ date: d.date, start: d.start, end: d.end })),
+    address: ev?.schoolAddress || '',
+    slot: String(ev?.slotMinutes ?? DEFAULT_SLOT),
+    email: state.teacher.email || '',
+  };
+}
+
+// ---------- Ungespeicherte Eingaben (bleiben bei Neuladen/Seitenwechsel im Tab erhalten) ----------
+
+/** Gespeicherter Stand, auf dem ein Entwurf beruht. Passt er nicht mehr, wird der Entwurf verworfen. */
+function draftBase(state) {
+  return JSON.stringify({ event: state.event || null, email: state.teacher.email || '' });
+}
+
+function draftKey(state) {
+  return DRAFT_PREFIX + state.teacher.teacherCode;
+}
+
+/** Liest einen noch nicht gespeicherten Entwurf dieses Tabs (oder null). */
+function loadStoredDraft(state) {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(draftKey(state)) || 'null');
+    if (!data || data.base !== draftBase(state) || !data.draft || !Array.isArray(data.draft.days)) return null;
+    const d = data.draft;
+    // Tage, die inzwischen in der Vergangenheit liegen, nur behalten, wenn sie schon gespeichert waren.
+    const today = todayIso();
+    const savedDates = new Set((state.event?.days || []).map((x) => x.date));
+    const seen = new Set();
+    const days = d.days
+      .filter((x) => x && ISO_RE.test(x.date) && (x.date >= today || savedDates.has(x.date)) && !seen.has(x.date) && seen.add(x.date))
+      .map((x) => ({ date: x.date, start: String(x.start ?? ''), end: String(x.end ?? '') }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    return { days, address: String(d.address ?? ''), slot: String(d.slot ?? ''), email: String(d.email ?? '') };
+  } catch {
+    return null;
+  }
+}
+
+function storeDraft(state, draft) {
+  try {
+    sessionStorage.setItem(draftKey(state), JSON.stringify({ base: draftBase(state), draft }));
+  } catch {
+    // Speicher nicht verfügbar – dann gehen ungespeicherte Eingaben beim Neuladen verloren.
+  }
+}
+
+function clearStoredDraft(state) {
+  try {
+    sessionStorage.removeItem(draftKey(state));
+  } catch {
+    // ignorieren
+  }
+}
+
+/** Uhrzeit aus einem Eingabefeld als "HH:MM" (Sekunden werden abgeschnitten). */
+function readTime(input) {
+  const m = /^(\d{2}):(\d{2})/.exec(input.value || '');
+  return m ? `${m[1]}:${m[2]}` : '';
+}
+
+function cleanAddress(text) {
+  return String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Gültige Slotlänge als Zahl oder null. */
+function validSlot(raw) {
+  const slot = Number(raw);
+  return String(raw).trim() !== '' && Number.isInteger(slot) && slot >= SLOT_MIN && slot <= SLOT_MAX && slot % 5 === 0 ? slot : null;
+}
+
+function eventFromDraft(draft) {
+  return {
+    schoolAddress: cleanAddress(draft.address),
+    slotMinutes: validSlot(draft.slot),
+    days: draft.days.map((d) => ({ date: d.date, start: d.start, end: d.end })).sort((a, b) => a.date.localeCompare(b.date)),
+  };
+}
+
+/** Prüft einen Tag. Gibt { message, fields } oder null zurück. */
+function dayProblem(day, slot) {
+  const s = toMinutes(day.start);
+  const e = toMinutes(day.end);
+  if (Number.isNaN(s) && Number.isNaN(e)) return { message: 'Bitte geben Sie die Anfangs- und die Endzeit ein.', fields: ['start', 'end'] };
+  if (Number.isNaN(s)) return { message: 'Bitte geben Sie eine Anfangszeit ein.', fields: ['start'] };
+  if (Number.isNaN(e)) return { message: 'Bitte geben Sie eine Endzeit ein.', fields: ['end'] };
+  const off = [s % 5 ? 'start' : null, e % 5 ? 'end' : null].filter(Boolean);
+  if (off.length) return { message: 'Bitte Uhrzeiten in 5-Minuten-Schritten angeben (z. B. 14:00, 14:05 oder 14:10).', fields: off };
+  if (e <= s) return { message: 'Die Endzeit muss nach der Anfangszeit liegen.', fields: ['end'] };
+  if (slot && e - s < slot) {
+    return { message: `In diese Zeit passt kein Termin von ${slot} Minuten. Bitte wählen Sie eine spätere Endzeit oder eine kürzere Terminlänge.`, fields: ['end'] };
+  }
+  return null;
+}
+
+/**
+ * Prüft den gesamten Entwurf.
+ * @returns {Array<{key:string, label:string, message:string, fields?:string[]}>}
+ */
+function validateDraft(draft) {
+  const errors = [];
+  const slot = validSlot(draft.slot);
+  if (draft.days.length === 0) {
+    errors.push({ key: 'days', label: 'Tage', message: 'Bitte wählen Sie im Kalender mindestens einen Tag aus.' });
+  } else if (draft.days.length > MAX_DAYS) {
+    errors.push({ key: 'days', label: 'Tage', message: `Bitte wählen Sie höchstens ${MAX_DAYS} Tage aus. Zurzeit sind ${draft.days.length} Tage ausgewählt.` });
+  }
+  for (const day of draft.days) {
+    const problem = dayProblem(day, slot);
+    if (problem) errors.push({ key: `day:${day.date}`, label: formatDateWithWeekday(day.date), ...problem });
+  }
+  const address = cleanAddress(draft.address);
+  if (!address) {
+    errors.push({ key: 'address', label: 'Adresse der Schule', message: 'Bitte geben Sie die Adresse der Schule ein.' });
+  } else if (address.length > ADDRESS_MAX_CHARS) {
+    errors.push({ key: 'address', label: 'Adresse der Schule', message: `Die Adresse ist zu lang (${address.length} Zeichen). Bitte kürzen Sie sie auf höchstens ${ADDRESS_MAX_CHARS} Zeichen, damit der QR-Code im Elternbrief gut lesbar bleibt.` });
+  } else if (address.split('\n').filter(Boolean).length > ADDRESS_MAX_LINES) {
+    errors.push({ key: 'address', label: 'Adresse der Schule', message: `Bitte geben Sie die Adresse in höchstens ${ADDRESS_MAX_LINES} Zeilen an.` });
+  }
+  if (slot === null) {
+    const n = Number(draft.slot);
+    let message = 'Bitte geben Sie die Länge eines Terminslots in Minuten ein.';
+    if (String(draft.slot).trim() !== '' && !Number.isNaN(n)) {
+      message = n < SLOT_MIN || n > SLOT_MAX ? `Die Terminlänge muss zwischen ${SLOT_MIN} und ${SLOT_MAX} Minuten liegen.` : 'Bitte die Terminlänge in 5-Minuten-Schritten angeben (z. B. 10 oder 15).';
+    }
+    errors.push({ key: 'slot', label: 'Terminlänge', message });
+  }
+  const email = draft.email.trim();
+  if (!email) errors.push({ key: 'email', label: 'E-Mail-Adresse', message: 'Bitte geben Sie Ihre E-Mail-Adresse ein.' });
+  else if (!isValidEmail(email)) errors.push({ key: 'email', label: 'E-Mail-Adresse', message: 'Bitte geben Sie eine gültige E-Mail-Adresse ein (z. B. name@schule.de).' });
+  return errors;
+}
+
+/** Vergleichbare Darstellung eines Entwurfs (für „ungespeicherte Änderungen“). */
+function draftSignature(draft) {
+  const ev = eventFromDraft(draft);
+  // „010“ und „10“ gelten als gleich, ungültige Eingaben werden als Text verglichen.
+  return JSON.stringify({ ...ev, slotMinutes: validSlot(draft.slot) ?? String(draft.slot).trim(), email: draft.email.trim() });
+}
+
+/** true beim zweiten (dritten …) Klick eines Doppelklicks – viele Nutzer doppelklicken aus Gewohnheit. */
+function ignoreRepeat(e) {
+  return e.detail > 1;
+}
+
+function classList(ids) {
+  return ids.length === 1 ? `die Klasse ${ids[0]}` : `die Klassen ${ids.slice(0, -1).join(', ')} und ${ids[ids.length - 1]}`;
+}
+
+// ---------- View ----------
+
+export default function render(ctx) {
+  const { root, params, navigate, setTitle } = ctx;
+  let saved = ctx.state;
+  // Ohne Elternsprechtag gibt es noch nichts einzustellen → zuerst erstellen.
+  if (params.mode === 'settings' && !saved.event) {
+    navigate('/lehrkraft/elternsprechtag', { replace: true });
+    return;
+  }
+  // Ist bereits ein Elternsprechtag angelegt, verhält sich „erstellen“ wie „Weitere Einstellungen“.
+  const isSettings = Boolean(saved.event);
+  setTitle(isSettings ? 'Weitere Einstellungen' : 'Elternsprechtag erstellen');
+
+  let savedSignature = draftSignature(draftFromState(saved));
+  // Noch nicht gespeicherte Eingaben aus diesem Tab (z. B. nach Neuladen oder Seitenwechsel) wiederherstellen.
+  const restored = loadStoredDraft(saved);
+  const draft = restored || draftFromState(saved);
+  if (restored && draftSignature(restored) === savedSignature) clearStoredDraft(saved);
+  else if (restored) {
+    toast(isSettings ? 'Ihre noch nicht gespeicherten Änderungen wurden wiederhergestellt.' : 'Ihre bisherigen Eingaben wurden wiederhergestellt.', 'info', 6000);
+  }
+  let showErrors = false;
+  let busy = false;
+  let finished = false; // nach dem Erstellen wird weitergeleitet – kein zweites Speichern
+  const dayRefs = new Map(); // Datum → { item, start, end, info, error, remove }
+
+  // --- Sammelhinweis oben ---
+  const summary = h('div', { class: 'alert alert-error evt-summary', tabindex: '-1', role: 'group', 'aria-labelledby': 'evt-summary-title', hidden: true });
+
+  // --- Kalender und Liste der Tage ---
+  const calendar = createCalendarPicker({ selected: draft.days.map((d) => d.date), onChange: onCalendarChange });
+  const daysError = h('div', { class: 'field-error evt-days-error', id: 'evt-days-error', 'aria-live': 'polite', hidden: true });
+  const dayCount = h('p', { class: 'evt-day-count', 'aria-live': 'polite' });
+  const emptyState = h('div', { class: 'empty-state evt-empty' }, 'Bitte wählen Sie im Kalender mindestens einen Tag aus.');
+  const dayList = h('ul', { class: 'evt-day-list', 'aria-label': 'Ausgewählte Tage' });
+  const copyBtn = h('button', { type: 'button', class: 'btn btn-secondary btn-small evt-copy', onclick: copyFirstTimes }, 'Zeiten des ersten Tages für alle Tage übernehmen');
+
+  // --- Formularfelder ---
+  const fields = {};
+  const addressInput = h('textarea', {
+    rows: '4',
+    placeholder: 'Name der Schule\nStraße Hausnummer\nPLZ Ort',
+    autocomplete: 'off',
+    'data-testid': 'event-address',
+    oninput: () => {
+      draft.address = addressInput.value;
+      onDraftInput();
+    },
+  });
+  addressInput.value = draft.address;
+  const slotInput = h('input', {
+    type: 'number',
+    min: String(SLOT_MIN),
+    max: String(SLOT_MAX),
+    step: '5',
+    inputmode: 'numeric',
+    value: draft.slot,
+    'data-testid': 'event-slot',
+    oninput: () => {
+      draft.slot = slotInput.value;
+      onDraftInput();
+    },
+  });
+  const emailInput = h('input', {
+    type: 'email',
+    autocomplete: 'email',
+    spellcheck: 'false',
+    maxlength: '254',
+    value: draft.email,
+    'data-testid': 'event-email',
+    oninput: () => {
+      draft.email = emailInput.value;
+      onDraftInput();
+    },
+  });
+
+  function formField(key, id, label, control, hint, extraClass = '') {
+    const hintEl = hint ? h('div', { class: 'field-hint', id: `${id}-hint` }, hint) : null;
+    const errorEl = h('div', { class: 'field-error', id: `${id}-error`, hidden: true });
+    control.id = id;
+    control.setAttribute('aria-describedby', [errorEl.id, hintEl?.id].filter(Boolean).join(' '));
+    fields[key] = { control, errorEl };
+    return h('div', { class: `field ${extraClass}`.trim() }, h('label', { for: id }, label), control, errorEl, hintEl);
+  }
+
+  const submitBtn = h(
+    'button',
+    { type: 'submit', class: 'btn btn-primary btn-large', 'data-testid': 'event-submit', onclick: (e) => ignoreRepeat(e) && e.preventDefault() },
+    isSettings ? 'Änderungen speichern' : 'Elternsprechtag erstellen',
+  );
+  const dirtyNote = h('span', { class: 'evt-dirty', 'aria-live': 'polite' });
+  const discardBtn = h('button', { type: 'button', class: 'btn btn-ghost btn-small evt-discard', onclick: discardChanges }, 'Änderungen verwerfen');
+  // Hinweis und „Verwerfen“ gehören zusammen und brechen gemeinsam um.
+  const dirtyGroup = h('div', { class: 'evt-dirty-group', hidden: true }, dirtyNote, discardBtn);
+
+  function cardTitle(num, text, id) {
+    return h('h2', { class: 'evt-card-title', id }, h('span', { class: 'evt-step', 'aria-hidden': 'true' }, num), text);
+  }
+
+  const form = h(
+    'form',
+    { class: 'stack evt-form', novalidate: true, onsubmit: onSubmit },
+    summary,
+    h(
+      'section',
+      { class: 'card', 'aria-labelledby': 'evt-days-title' },
+      cardTitle('1', 'Tage und Uhrzeiten', 'evt-days-title'),
+      h('p', { class: 'muted evt-card-intro' }, 'Klicken Sie im Kalender auf jeden Tag, an dem der Elternsprechtag stattfindet. Ein zweiter Klick entfernt den Tag wieder.'),
+      h(
+        'div',
+        { class: 'evt-days-layout' },
+        h('div', { class: 'evt-calendar-col' }, calendar),
+        h(
+          'div',
+          { class: 'evt-list-col' },
+          h('div', { class: 'evt-list-head' }, h('h3', { class: 'evt-list-title', id: 'evt-list-title', tabindex: '-1' }, 'Ausgewählte Tage'), dayCount),
+          daysError,
+          emptyState,
+          dayList,
+          copyBtn,
+        ),
+      ),
+    ),
+    h(
+      'section',
+      { class: 'card', 'aria-labelledby': 'evt-info-title' },
+      cardTitle('2', 'Angaben für die Eltern', 'evt-info-title'),
+      h(
+        'div',
+        { class: 'form-grid' },
+        formField('address', 'evt-address', 'Adresse der Schule', addressInput, `Wird den Eltern angezeigt, damit sie wissen, wo die Gespräche stattfinden (höchstens ${ADDRESS_MAX_CHARS} Zeichen).`, 'field-full'),
+        formField(
+          'slot',
+          'evt-slot',
+          'Standardlänge eines Terminslots (Minuten)',
+          slotInput,
+          isSettings ? 'Gilt für die Zeitauswahl der Eltern und für neue Termine. Bereits geplante Termine behalten ihre Dauer.' : 'Kann später unter „Weitere Einstellungen“ geändert werden.',
+        ),
+        formField('email', 'evt-email', 'E-Mail-Adresse für Rückmeldungen der Eltern', emailInput, 'Steht im Elternbrief. An diese Adresse schicken die Eltern ihre Rückmeldung.'),
+      ),
+    ),
+    h(
+      'div',
+      { class: 'evt-actions' },
+      submitBtn,
+      isSettings ? h('a', { class: 'btn btn-secondary btn-large', href: '#/lehrkraft/klassen' }, 'Zurück zu den Klassen') : null,
+      isSettings ? dirtyGroup : null,
+    ),
+  );
+
+  // --- Tage zeichnen ---
+
+  function dayItem(day) {
+    const base = `evt-day-${day.date}`;
+    const label = formatDateWithWeekday(day.date);
+    const info = h('p', { class: 'evt-day-info', id: `${base}-info` });
+    const error = h('div', { class: 'field-error evt-day-error', id: `${base}-error`, hidden: true });
+    const timeInput = (which) => {
+      const input = h('input', {
+        type: 'time',
+        step: '300',
+        id: `${base}-${which}`,
+        value: day[which],
+        required: true,
+        'data-testid': `event-day-${which}-${day.date}`,
+        'aria-describedby': `${error.id} ${info.id}`,
+      });
+      input.addEventListener('input', () => {
+        day[which] = readTime(input);
+        onDraftInput();
+      });
+      return input;
+    };
+    const start = timeInput('start');
+    const end = timeInput('end');
+    const remove = h(
+      'button',
+      { type: 'button', class: 'btn btn-ghost btn-small evt-day-remove', 'aria-label': `${label} entfernen`, title: 'Tag entfernen', onclick: (e) => ignoreRepeat(e) || removeDay(day.date) },
+      h('span', { 'aria-hidden': 'true' }, '✕'),
+      h('span', { class: 'evt-day-remove-text' }, 'Entfernen'),
+    );
+    const timeField = (input, text) => h('div', { class: 'field evt-time' }, h('label', { for: input.id }, text, h('span', { class: 'visually-hidden' }, ` am ${formatDate(day.date)}`)), input);
+    const item = h(
+      'li',
+      { class: 'evt-day', dataset: { date: day.date } },
+      h('div', { class: 'evt-day-head' }, h('div', { class: 'evt-day-title' }, label), info),
+      h('div', { class: 'evt-day-times' }, timeField(start, 'Anfangszeit'), h('span', { class: 'evt-day-sep', 'aria-hidden': 'true' }, 'bis'), timeField(end, 'Endzeit')),
+      remove,
+      error,
+    );
+    dayRefs.set(day.date, { item, start, end, info, error, remove });
+    return item;
+  }
+
+  function renderDays() {
+    dayRefs.clear();
+    const n = draft.days.length;
+    emptyState.hidden = n > 0;
+    dayList.hidden = n === 0;
+    copyBtn.hidden = n < 2;
+    dayCount.textContent = n ? `${plural(n, 'Tag', 'Tage')} ausgewählt` : 'noch kein Tag ausgewählt';
+    mount(dayList, draft.days.map(dayItem));
+    refresh();
+  }
+
+  /** Aktualisiert Hinweise, Fehlermeldungen und Speicherstatus, ohne Eingabefelder neu zu erzeugen. */
+  function refresh() {
+    updateDayInfos();
+    // Mehr als 8 Tage sofort melden, alles andere erst nach dem ersten Speicherversuch.
+    if (showErrors) applyErrors(validateDraft(draft));
+    else if (draft.days.length > MAX_DAYS) setDaysError(validateDraft(draft).find((e) => e.key === 'days')?.message || '');
+    else setDaysError('');
+    updateDirty();
+  }
+
+  function onDraftInput() {
+    refresh();
+  }
+
+  function updateDayInfos() {
+    const slot = validSlot(draft.slot);
+    for (const day of draft.days) {
+      const ref = dayRefs.get(day.date);
+      if (!ref) continue;
+      const s = toMinutes(day.start);
+      const e = toMinutes(day.end);
+      let text = '';
+      if (slot && !Number.isNaN(s) && !Number.isNaN(e) && e > s) {
+        const starts = slotStarts(day.start, day.end, slot);
+        if (starts.length) {
+          const lastEnd = starts[starts.length - 1] + slot;
+          text = `${plural(starts.length, 'Termin', 'Termine')} zu je ${slot} Minuten`;
+          if (lastEnd < e) text += ` (der letzte endet um ${fromMinutes(lastEnd)} Uhr)`;
+        }
+      }
+      ref.info.textContent = text;
+      ref.info.hidden = !text;
+    }
+  }
+
+  /** Merkt sich ungespeicherte Eingaben im Tab und zeigt (nur in den Einstellungen) den Hinweis dazu. */
+  function updateDirty() {
+    const dirty = draftSignature(draft) !== savedSignature;
+    if (dirty) storeDraft(saved, draft);
+    else clearStoredDraft(saved);
+    if (!isSettings) return;
+    dirtyNote.textContent = dirty ? 'Sie haben ungespeicherte Änderungen.' : '';
+    dirtyGroup.hidden = !dirty;
+  }
+
+  /** Setzt alle Felder auf den gespeicherten Stand zurück. */
+  function discardChanges() {
+    saved = getCurrentState() || saved;
+    savedSignature = draftSignature(draftFromState(saved));
+    Object.assign(draft, draftFromState(saved));
+    addressInput.value = draft.address;
+    slotInput.value = draft.slot;
+    emailInput.value = draft.email;
+    calendar.setSelected(draft.days.map((d) => d.date));
+    showErrors = false;
+    applyErrors([]);
+    renderDays();
+    toast('Ihre Änderungen wurden verworfen.', 'info');
+    submitBtn.focus();
+  }
+
+  // --- Fehlermeldungen ---
+
+  function setFieldError(control, errorEl, message) {
+    errorEl.textContent = message;
+    errorEl.hidden = !message;
+    if (message) control.setAttribute('aria-invalid', 'true');
+    else control.removeAttribute('aria-invalid');
+  }
+
+  function setDaysError(message) {
+    daysError.textContent = message;
+    daysError.hidden = !message;
+  }
+
+  function applyErrors(errors) {
+    for (const { control, errorEl } of Object.values(fields)) setFieldError(control, errorEl, '');
+    setDaysError('');
+    for (const ref of dayRefs.values()) {
+      ref.error.textContent = '';
+      ref.error.hidden = true;
+      ref.item.classList.remove('evt-day-invalid');
+      ref.start.removeAttribute('aria-invalid');
+      ref.end.removeAttribute('aria-invalid');
+    }
+    for (const err of errors) {
+      if (err.key === 'days') setDaysError(err.message);
+      else if (err.key.startsWith('day:')) {
+        const ref = dayRefs.get(err.key.slice(4));
+        if (!ref) continue;
+        ref.error.textContent = err.message;
+        ref.error.hidden = false;
+        ref.item.classList.add('evt-day-invalid');
+        for (const f of err.fields || []) ref[f].setAttribute('aria-invalid', 'true');
+      } else if (fields[err.key]) setFieldError(fields[err.key].control, fields[err.key].errorEl, err.message);
+    }
+    renderSummary(errors);
+    return errors;
+  }
+
+  function focusError(err) {
+    if (err.key === 'days') {
+      calendar.focusDay();
+      return;
+    }
+    if (err.key.startsWith('day:')) {
+      const ref = dayRefs.get(err.key.slice(4));
+      ref?.[err.fields?.[0] || 'start']?.focus();
+      return;
+    }
+    fields[err.key]?.control.focus();
+  }
+
+  function renderSummary(errors) {
+    if (!errors.length) {
+      summary.hidden = true;
+      mount(summary);
+      return;
+    }
+    summary.hidden = false;
+    mount(
+      summary,
+      h('p', { id: 'evt-summary-title' }, h('strong', {}, errors.length === 1 ? 'Bitte prüfen Sie diese Angabe:' : `Bitte prüfen Sie diese ${errors.length} Angaben:`)),
+      h(
+        'ul',
+        { class: 'evt-summary-list' },
+        errors.map((err) => h('li', {}, h('button', { type: 'button', class: 'evt-summary-link', onclick: () => focusError(err) }, `${err.label}: ${err.message}`))),
+      ),
+    );
+  }
+
+  // --- Aktionen ---
+
+  function onCalendarChange(dates) {
+    const byDate = new Map(draft.days.map((d) => [d.date, d]));
+    // Neuer Tag übernimmt die Zeiten des letzten vorhandenen Tages (sofern gültig), sonst 14:00–18:00.
+    const last = draft.days[draft.days.length - 1];
+    const lastOk = last && toMinutes(last.end) > toMinutes(last.start);
+    const template = lastOk ? { start: last.start, end: last.end } : { start: DEFAULT_START, end: DEFAULT_END };
+    draft.days = dates.map((date) => byDate.get(date) || { date, ...template });
+    renderDays();
+  }
+
+  function removeDay(date) {
+    const index = draft.days.findIndex((d) => d.date === date);
+    draft.days = draft.days.filter((d) => d.date !== date);
+    calendar.setSelected(draft.days.map((d) => d.date));
+    renderDays();
+    // Fokus auf den nächsten Tag (bzw. die Überschrift), damit Tastaturnutzer nicht „verloren“ gehen.
+    const nextDay = draft.days[Math.min(index, draft.days.length - 1)];
+    if (nextDay) dayRefs.get(nextDay.date)?.remove.focus();
+    else document.getElementById('evt-list-title')?.focus();
+  }
+
+  function copyFirstTimes() {
+    const [first, ...rest] = draft.days;
+    if (!first) return;
+    if (dayProblem(first, null)) {
+      toast(`Bitte legen Sie zuerst gültige Uhrzeiten für ${formatDateWithWeekday(first.date)} fest.`, 'warning');
+      dayRefs.get(first.date)?.start.focus();
+      return;
+    }
+    for (const day of rest) {
+      day.start = first.start;
+      day.end = first.end;
+      const ref = dayRefs.get(day.date);
+      if (ref) {
+        ref.start.value = first.start;
+        ref.end.value = first.end;
+      }
+    }
+    refresh();
+    toast(`Die Zeiten ${first.start}–${first.end} Uhr gelten jetzt für alle Tage.`, 'success');
+  }
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    if (busy || finished) return;
+    showErrors = true;
+    const errors = applyErrors(validateDraft(draft));
+    if (errors.length) {
+      summary.focus();
+      return;
+    }
+    busy = true;
+    submitBtn.disabled = true;
+    try {
+      if (isSettings) await saveSettings();
+      else saveNewEvent();
+    } catch (err) {
+      console.error(err);
+      toast(`Speichern fehlgeschlagen: ${err.message || err}`, 'error', 8000);
+    } finally {
+      busy = false;
+      submitBtn.disabled = false;
+    }
+  }
+
+  function saveNewEvent() {
+    const event = eventFromDraft(draft);
+    const email = draft.email.trim();
+    updateState((s) => {
+      s.event = event;
+      s.teacher.email = email;
+    });
+    clearStoredDraft(saved);
+    finished = true;
+    toast('Ihr Elternsprechtag wurde erstellt. Legen Sie jetzt Ihre Klassen an.', 'success');
+    navigate('/lehrkraft/klassen');
+  }
+
+  async function saveSettings() {
+    const event = eventFromDraft(draft);
+    const email = draft.email.trim();
+    const current = getCurrentState() || saved;
+    const newDates = new Set(event.days.map((d) => d.date));
+    const removed = new Set((current.event?.days || []).map((d) => d.date).filter((d) => !newDates.has(d)));
+
+    // Termine auf entfernten Tagen
+    const affected = [];
+    for (const cls of current.classes) {
+      for (const st of cls.students) {
+        if (st.appointment && removed.has(st.appointment.date)) affected.push({ cls, st });
+      }
+    }
+    if (affected.length) {
+      const n = affected.length;
+      const shown = affected.slice(0, 6);
+      const ok = await confirmDialog({
+        title: 'Geplante Termine löschen?',
+        message: h(
+          'div',
+          { class: 'stack-small' },
+          h('p', {}, `Auf ${removed.size === 1 ? 'dem entfernten Tag' : 'den entfernten Tagen'} ${n === 1 ? 'liegt bereits 1 geplanter Termin' : `liegen bereits ${n} geplante Termine`}. Wenn Sie speichern, ${n === 1 ? 'wird dieser Termin' : 'werden diese Termine'} gelöscht und ${n === 1 ? 'muss' : 'müssen'} neu geplant werden.`),
+          h(
+            'ul',
+            { class: 'evt-affected' },
+            shown.map(({ cls, st }) => h('li', {}, `${st.firstName} ${st.lastName} (Klasse ${cls.id}) – ${formatDate(st.appointment.date)}, ${st.appointment.start} Uhr`)),
+            n > shown.length ? h('li', {}, `… und ${n - shown.length} weitere`) : null,
+          ),
+        ),
+        confirmText: n === 1 ? 'Speichern und Termin löschen' : 'Speichern und Termine löschen',
+        cancelText: 'Abbrechen',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+
+    const eventChanged = JSON.stringify(current.event) !== JSON.stringify(event) || (current.teacher.email || '') !== email;
+    saved = updateState((s) => {
+      s.event = event;
+      s.teacher.email = email;
+      for (const cls of s.classes) {
+        for (const st of cls.students) {
+          if (st.appointment && removed.has(st.appointment.date)) st.appointment = null;
+        }
+      }
+    });
+    savedSignature = draftSignature(draftFromState(saved));
+    updateDirty();
+
+    toast('Einstellungen gespeichert.', 'success');
+    if (affected.length) toast(`${plural(affected.length, 'Termin wurde', 'Termine wurden')} gelöscht.`, 'warning');
+    const outside = countOutsideAppointments(saved);
+    if (outside) toast(`${plural(outside, 'geplanter Termin liegt', 'geplante Termine liegen')} jetzt außerhalb der Uhrzeiten. Bitte prüfen Sie diese unter „Gespräche terminieren“.`, 'warning', 9000);
+    if (eventChanged && saved.classes.some((c) => c.codesGenerated)) {
+      toast('Bitte erstellen Sie die Elternbriefe neu, damit die Eltern die geänderten Angaben erhalten.', 'warning', 9000);
+    }
+  }
+
+  async function onDeleteAll() {
+    const content = h(
+      'div',
+      { class: 'stack-small' },
+      h('p', {}, 'Ihr Elternsprechtag, alle Klassen, Lernenden, Rückmeldungen und Termine werden endgültig aus diesem Browser gelöscht. Das lässt sich nicht rückgängig machen.'),
+      alertBox('warning', h('strong', {}, 'Wichtig: '), 'Speichern Sie vorher einen Zwischenstand, wenn Sie die Daten später noch brauchen. Mit dieser Datei können Sie alles wiederherstellen.'),
+      h(
+        'div',
+        {},
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn btn-secondary',
+            onclick: (e) => {
+              if (ignoreRepeat(e)) return;
+              const state = getCurrentState();
+              if (!state) return;
+              const name = downloadBackup(state);
+              toast(`Zwischenstand gespeichert: „${name}“`, 'success');
+            },
+          },
+          'Zwischenstand jetzt speichern',
+        ),
+      ),
+    );
+    const ok = await confirmDialog({ title: 'Alle Daten in diesem Browser löschen?', message: content, confirmText: 'Endgültig löschen', cancelText: 'Abbrechen', danger: true });
+    if (!ok) return;
+    clearStoredDraft(saved);
+    deleteTeacherState(saved.teacher.teacherCode);
+    clearSession();
+    toast('Ihre Daten wurden aus diesem Browser gelöscht.', 'success');
+    navigate('/');
+  }
+
+  // --- Seite zusammensetzen ---
+
+  const lettersClasses = saved.classes.filter((c) => c.codesGenerated).map((c) => c.id);
+  const t = saved.teacher;
+  const profileRow = (label, value) => h('div', { class: 'evt-profile-row' }, h('dt', {}, label), h('dd', {}, value));
+
+  mount(
+    root,
+    h(
+      'div',
+      { class: 'evt-page' },
+      isSettings ? h('a', { class: 'back-link', href: '#/lehrkraft/klassen' }, 'Zurück zu den Klassen') : null,
+      h(
+        'div',
+        { class: 'page-header' },
+        h(
+          'div',
+          {},
+          h('h1', {}, isSettings ? 'Weitere Einstellungen' : 'Elternsprechtag erstellen'),
+          h(
+            'p',
+            { class: 'subtitle' },
+            isSettings
+              ? 'Hier ändern Sie die Tage, Uhrzeiten, die Adresse der Schule, die Terminlänge und Ihre E-Mail-Adresse.'
+              : 'Wählen Sie im Kalender den Tag bzw. die Tage des Elternsprechtags aus und legen Sie für jeden Tag die Anfangs- und die Endzeit fest.',
+          ),
+        ),
+      ),
+      isSettings && lettersClasses.length
+        ? alertBox(
+            'warning',
+            h('p', {}, h('strong', {}, 'Elternbriefe wurden bereits erstellt.')),
+            h(
+              'p',
+              {},
+              `Für ${classList(lettersClasses)} wurden bereits Codes und Elternbriefe erstellt. Bereits verteilte Elternbriefe und QR-Codes enthalten die bisherigen Tage, Uhrzeiten und die bisherige Terminlänge. Wenn Sie hier etwas ändern, erstellen Sie die Elternbriefe danach bitte neu und verteilen Sie sie erneut.`,
+            ),
+          )
+        : null,
+      form,
+      isSettings
+        ? h(
+            'div',
+            { class: 'grid-2 evt-extra' },
+            h(
+              'section',
+              { class: 'card', 'aria-labelledby': 'evt-profile-title' },
+              h('h2', { id: 'evt-profile-title' }, 'Ihr Profil'),
+              h(
+                'dl',
+                { class: 'evt-profile' },
+                profileRow('Name', `${t.firstName} ${t.lastName}`),
+                profileRow('Geburtsdatum', t.birthDate ? formatDate(t.birthDate) : '–'),
+                profileRow('Registrierungscode', h('span', { class: 'code' }, t.registrationCode || '–')),
+                profileRow('Lehrkräftecode', h('span', { class: 'code' }, t.teacherCode)),
+              ),
+              h('p', { class: 'muted small' }, 'Diese Angaben stammen aus Ihrer Registrierung und können nicht geändert werden, weil Ihre Codes daraus berechnet werden.'),
+            ),
+            h(
+              'section',
+              { class: 'card evt-danger', 'aria-labelledby': 'evt-danger-title' },
+              h('h2', { id: 'evt-danger-title' }, 'Gefahrenbereich'),
+              h('p', {}, 'Entfernt Ihren Elternsprechtag, alle Klassen, Lernenden, Rückmeldungen und Termine aus diesem Browser. Anschließend werden Sie abgemeldet.'),
+              h('p', { class: 'muted small' }, 'Tipp: Speichern Sie vorher einen Zwischenstand, damit Sie Ihre Daten bei Bedarf wiederherstellen können.'),
+              h('button', { type: 'button', class: 'btn btn-danger', onclick: onDeleteAll }, 'Alle Daten in diesem Browser löschen'),
+            ),
+          )
+        : null,
+    ),
+  );
+  renderDays();
+}
+
+/** Zählt geplante Termine, die nicht mehr in die Uhrzeiten ihres Tages passen. */
+function countOutsideAppointments(state) {
+  const days = new Map((state.event?.days || []).map((d) => [d.date, d]));
+  let count = 0;
+  for (const cls of state.classes) {
+    for (const st of cls.students) {
+      const a = st.appointment;
+      const day = a && days.get(a.date);
+      if (!day) continue;
+      const s = toMinutes(a.start);
+      if (s < toMinutes(day.start) || s + (Number(a.duration) || 0) > toMinutes(day.end)) count++;
+    }
+  }
+  return count;
 }

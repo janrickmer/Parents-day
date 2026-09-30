@@ -1,1 +1,335 @@
-/* teacher-auth */
+/* Zugang für Lehrkräfte: Auswahl, Registrierung, Anmeldung (Präfix .tauth-) */
+
+.tauth-page {
+  max-width: 1000px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.tauth-page-narrow {
+  max-width: 720px;
+}
+.tauth-page > .page-header {
+  margin-bottom: 0;
+}
+
+/* Umschalter Registrieren | Anmelden */
+.tauth-switch {
+  align-self: flex-start;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+.tauth-switch-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 6px 22px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--c-text);
+}
+.tauth-switch-link:hover {
+  background: var(--c-primary-soft);
+  color: var(--c-primary-dark);
+}
+.tauth-switch-link[aria-current='page'] {
+  background: var(--c-primary);
+  color: #fff;
+}
+
+.tauth-eyebrow {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-primary);
+}
+
+/* Auswahl-Karten */
+.tauth-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 28px 24px 24px;
+  border: 2px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-surface);
+  box-shadow: var(--shadow);
+  color: var(--c-text);
+  text-decoration: none;
+  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+.tauth-choice:hover,
+.tauth-choice:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--c-primary);
+  box-shadow: var(--shadow-strong);
+  color: var(--c-text);
+}
+.tauth-choice:focus-visible {
+  box-shadow: var(--focus), var(--shadow-strong);
+}
+.tauth-choice-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 6px;
+  border-radius: 14px;
+  background: var(--c-primary);
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.tauth-choice-login .tauth-choice-icon {
+  background: var(--c-accent-soft);
+  border: 2px solid var(--c-accent-border);
+  color: #6b5300;
+}
+.tauth-choice-title {
+  font-size: 1.6rem;
+  margin: 0;
+}
+.tauth-choice-text {
+  flex: 1;
+  margin: 0 0 8px;
+  color: var(--c-muted);
+}
+.tauth-choice-cta {
+  pointer-events: none;
+}
+
+/* Hinweis „Sie sind angemeldet als …“ */
+.tauth-session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.tauth-session-text {
+  margin: 0;
+}
+
+/* Formulare */
+.tauth-form {
+  display: flex;
+  flex-direction: column;
+}
+.tauth-form .form-actions {
+  margin-top: 20px;
+}
+.tauth-status:not(:empty) {
+  margin-top: 16px;
+}
+.tauth-status > .alert p {
+  margin: 0;
+}
+.tauth-actions .btn {
+  white-space: normal;
+  text-align: center;
+}
+.tauth-code-input {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.tauth-alt {
+  margin: 0;
+  text-align: center;
+  color: var(--c-muted);
+}
+.tauth-alt a {
+  font-weight: 600;
+}
+
+/* Anmelden: zwei Wege */
+.tauth-ways {
+  align-items: stretch;
+}
+.tauth-way {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tauth-way > h2 {
+  margin: 0;
+}
+.tauth-way > p {
+  margin: 0 0 4px;
+}
+.tauth-way .tauth-status:not(:empty) {
+  margin-top: 4px;
+}
+/* Tablets: beide Karten nebeneinander sind schmal – Felder dann untereinander */
+@media (min-width: 721px) and (max-width: 900px) {
+  .tauth-way .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.tauth-way > .tauth-tip {
+  margin: 0;
+}
+.tauth-checking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+.tauth-spinner {
+  border-color: var(--c-primary-soft);
+  border-top-color: var(--c-primary);
+}
+
+/* Erfolgsansicht */
+.tauth-success-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.tauth-success-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--c-success-soft);
+  border: 2px solid var(--c-success);
+  color: var(--c-success);
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+.tauth-success-title {
+  margin: 0;
+}
+.tauth-success-title:focus,
+.tauth-success-title:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.tauth-success-head .subtitle {
+  margin: 4px 0 0;
+}
+
+.tauth-codes {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.tauth-code-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 20px;
+  border: 2px solid var(--c-accent-border);
+  border-radius: var(--radius);
+  background: var(--c-accent-soft);
+}
+.tauth-code-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #6b5300;
+}
+.tauth-code-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 1.45rem;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+.tauth-code-box-main .tauth-code-value {
+  font-size: 2rem;
+}
+.tauth-code-hint {
+  font-size: 0.85rem;
+  color: var(--c-muted);
+}
+
+.tauth-download {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.tauth-download-text {
+  flex: 1 1 280px;
+}
+.tauth-download-text p {
+  margin: 0;
+}
+.tauth-download .btn {
+  flex: none;
+}
+.tauth-page > .tauth-actions {
+  margin-top: 0;
+}
+
+.tauth-summary-card > h2 {
+  font-size: 1.1rem;
+}
+.tauth-summary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 20px;
+  margin: 0;
+}
+.tauth-summary dt {
+  color: var(--c-muted);
+}
+.tauth-summary dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .tauth-codes {
+    grid-template-columns: 1fr;
+  }
+  .tauth-code-box-main .tauth-code-value {
+    font-size: 1.75rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .tauth-page {
+    gap: 16px;
+  }
+  .tauth-switch {
+    align-self: stretch;
+  }
+  .tauth-switch-link {
+    flex: 1;
+    justify-content: center;
+    padding: 6px 12px;
+  }
+  .tauth-choice {
+    padding: 20px 18px 18px;
+  }
+  .tauth-choice-cta {
+    align-self: stretch;
+  }
+  .tauth-actions .btn,
+  .tauth-download .btn {
+    width: 100%;
+  }
+  .tauth-summary {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .tauth-summary dd {
+    margin-bottom: 8px;
+  }
+}

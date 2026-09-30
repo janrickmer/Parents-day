@@ -44,7 +44,9 @@ export async function startServer() {
 
 /** Startet Chromium mit deutscher Sprache/Zeitzone. Sammelt Konsolenfehler in `errors`. */
 export async function launch({ viewport = { width: 1280, height: 900 }, hasTouch = false, isMobile = false } = {}) {
-  const browser = await chromium.launch();
+  // UTF-8-Locale: sonst ersetzt Chromium Download-Namen mit Umlauten durch „download“.
+  // --lang=de-DE: Uhrzeitfelder im 24-Stunden-Format wie bei deutschen Nutzern.
+  const browser = await chromium.launch({ env: { ...process.env, LANG: 'C.UTF-8' }, args: ['--lang=de-DE'] });
   const context = await browser.newContext({ acceptDownloads: true, locale: 'de-DE', timezoneId: 'Europe/Berlin', viewport, hasTouch, isMobile });
   const page = await context.newPage();
   const errors = [];
@@ -59,11 +61,14 @@ export async function launch({ viewport = { width: 1280, height: 900 }, hasTouch
  * Führt `action` aus und wartet auf den dadurch ausgelösten Download.
  * @returns {Promise<{filename:string, file:string, buffer:Buffer}>}
  */
-export async function captureDownload(page, action, { timeout = 30000 } = {}) {
+export async function captureDownload(page, action, { timeout = 30000, dir } = {}) {
   const [download] = await Promise.all([page.waitForEvent('download', { timeout }), action()]);
+  // Eigener Unterordner je Download, damit parallel laufende Tests gleichnamige Dateien nicht überschreiben.
   await fs.mkdir(OUTPUT, { recursive: true });
+  const target = dir || (await fs.mkdtemp(path.join(OUTPUT, 'dl-')));
+  await fs.mkdir(target, { recursive: true });
   const filename = download.suggestedFilename();
-  const file = path.join(OUTPUT, filename);
+  const file = path.join(target, filename);
   await download.saveAs(file);
   return { filename, file, buffer: await fs.readFile(file) };
 }

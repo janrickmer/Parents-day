@@ -794,13 +794,35 @@ textarea[aria-invalid='true'] {
   margin-right: 6px;
 }
 
+@media (min-width: 721px) {
+  /* Fokussierte Felder nicht unter der fixierten Kopfzeile verstecken. */
+  html {
+    scroll-padding-top: 110px;
+  }
+}
+
 @media (max-width: 720px) {
   h1 {
     font-size: 1.45rem;
   }
+  /* Auf Smartphones scrollt die (mehrzeilige) Kopfzeile mit, damit Platz für den Inhalt bleibt. */
+  .site-header {
+    position: static;
+  }
+  .header-inner {
+    min-height: 56px;
+    gap: 8px 16px;
+  }
   .header-user {
     margin-left: 0;
     justify-content: flex-start;
+    width: 100%;
+  }
+  .teacher-header .header-actions {
+    width: 100%;
+  }
+  .teacher-header .header-actions .btn {
+    flex: 1 1 auto;
   }
   .card {
     padding: 16px;

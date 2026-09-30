@@ -202,7 +202,8 @@ export function normalizeTeacherState(raw) {
 }
 
 // --- Elternseite ---
-// ParentState: { event: EventInfo|null, login: {firstName,lastName,code}|null, selection: {'JJJJ-MM-TT': [slotStartMinuten…]}, submittedAt?: string }
+// ParentState: { event: EventInfo|null, login: {firstName,lastName,code}|null, selection: {'JJJJ-MM-TT': [slotStartMinuten…]},
+//                submittedAt?: string, lastPayload?: ResponsePayload, lastFilename?: string, teacherEmailInput?: string }
 
 export function loadParentState() {
   const raw = storageGet(localStorage, PARENT_KEY);

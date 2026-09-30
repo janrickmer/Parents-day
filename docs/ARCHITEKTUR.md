@@ -14,7 +14,8 @@ Lehrkraft (Browser, localStorage)
   ▼
 Eltern (Browser)  →  markieren freie Slots  →  „Absenden“
   │  Rückmelde-PDF (Daten in PDF-Metadaten) wird heruntergeladen
-  │  + E-Mail-Programm öffnet sich (mailto:) an die Lehrkraft, Text enthält Block PARENTSDAY[…]
+  │  + Fertig-Seite mit Knopf „E-Mail an die Lehrkraft schreiben“ (mailto:, Text enthält Block PARENTSDAY[…]),
+  │    auf Smartphones zusätzlich „PDF teilen …“ (Web Share API, z. B. direkt in die Mail-App)
   ▼
 Lehrkraft lädt die PDFs gesammelt hoch (oder fügt E-Mail-Text ein) → Spalte „Verfügbarkeit“ füllt sich
 ```
@@ -97,6 +98,8 @@ Der Zwischenspeicher (`Zwischenspeicher vom TT.MM.JJJJ um hh꞉mm für ParentsDa
 |---|---|---|
 | Registrierungs-PDF | `teacher-registration` | `app:'ParentsDay', v:1, firstName, lastName, birthDate, email, registrationCode, teacherCode, createdAt` |
 | Rückmelde-PDF / E-Mail-Block | `parent-response` | siehe `buildResponsePayload()` in `transport.js` |
+| Elternbriefe-PDF | `parent-letters` | `app, v:1, classId, count, createdAt` (nur zur Erkennung bei versehentlichem Hochladen) |
+| Termin-PDF | `appointments` | `app, v:1, classId, count, createdAt` (nur zur Erkennung bei versehentlichem Hochladen) |
 
 PDF-Daten stehen im Metadatenfeld „Betreff“ als `PARENTSDAY1.<base64url-JSON>` (`embedPayload()` / `extractPayloadFromFile()` in `core/pdf.js`).
 
