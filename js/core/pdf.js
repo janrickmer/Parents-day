@@ -333,13 +333,13 @@ export function savePdf(doc, filename) {
 }
 
 /**
- * Öffnet das PDF zum Drucken in einem neuen Tab. `targetWindow` sollte direkt im Klick-Handler
- * mit window.open('', '_blank') geöffnet werden, damit Popup-Blocker nicht eingreifen.
+ * Öffnet das PDF in einem neuen Tab – ohne automatischen Druckdialog. Drucken können Nutzer dort
+ * selbst über den Druckbefehl des Browsers. `targetWindow` sollte direkt im Klick-Handler mit
+ * window.open('', '_blank') geöffnet werden, damit Popup-Blocker nicht eingreifen.
  * @returns {boolean} ob das Öffnen geklappt hat
  */
-export function openPdfForPrint(doc, targetWindow = null) {
+export function openPdfInNewTab(doc, targetWindow = null) {
   try {
-    doc.autoPrint();
     const url = URL.createObjectURL(doc.output('blob'));
     if (targetWindow && !targetWindow.closed) {
       targetWindow.location.href = url;

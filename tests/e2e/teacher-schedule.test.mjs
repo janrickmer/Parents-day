@@ -590,9 +590,11 @@ test('Terminieren: Popup-Blocker, Doppelklick und lange Übersicht im PDF', asyn
     // (ohne PDF-Betrachter) die Blob-Datei unter einem zufälligen Namen herunter – je nach Zeitpunkt
     // wird dieser Download der Hauptseite oder dem Tab zugerechnet.
     const popups = [];
+    const tabPdfs = []; // PDF, die der neue Tab anzeigt (im Test-Browser als Download mit zufälligem Namen)
     let downloads = 0;
     const count = (d) => {
       if (d.suggestedFilename() === 'ParentsDay Termine Klasse 5a.pdf') downloads++;
+      else tabPdfs.push(d);
     };
     page.on('download', count);
     context.on('page', (p) => {
@@ -601,12 +603,20 @@ test('Terminieren: Popup-Blocker, Doppelklick und lange Übersicht im PDF', asyn
     });
     const dl = await captureDownload(page, () => page.dblclick(tid('schedule-finalize')));
     await page.locator('.sched-messages .alert-success').waitFor();
+    assert.match(await page.textContent('.sched-messages'), /in einem neuen Tab geöffnet\. Zum Drucken nutzen Sie dort den Druckbefehl Ihres Browsers\./);
     // Auf schnellen Rechnern ist die PDF fertig, bevor der zweite Klick des Doppelklicks ankommt:
     // diesen zweiten Klick (detail 2) gezielt nach dem Erstellen auslösen.
     await page.$eval(tid('schedule-finalize'), (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
     await page.waitForTimeout(800);
     assert.equal(downloads, 1);
     assert.equal(popups.length, 1);
+    // Kein automatischer Druckdialog: weder die heruntergeladene PDF noch die im neuen Tab enthält einen
+    // Druckauftrag beim Öffnen (jsPDF autoPrint schreibt die Aktion /N /Print bzw. JavaScript print(…);
+    // das übliche /OpenAction [… /FitH null] für die Anfangsansicht ist harmlos).
+    const noAutoPrint = (buffer, label) => assert.doesNotMatch(buffer.toString('latin1'), /\/N\s*\/Print|\/S\s*\/JavaScript|print\s*\(/, `${label}: automatischer Druckauftrag`);
+    noAutoPrint(dl.buffer, 'Download');
+    if (tabPdfs.length) noAutoPrint(await fs.readFile(await tabPdfs[0].path()), 'Neuer Tab');
+    else t.diagnostic('Der Test-Browser hat die PDF im neuen Tab nicht als Datei bereitgestellt – nur der Download wurde geprüft.');
     assert.equal(pdfPayload(dl.buffer).count, 30);
     const pages = pdfPageCount(dl.buffer);
     assert.ok(pages >= 30 + 2, `Übersicht über mehrere Seiten erwartet, Seiten: ${pages}`);

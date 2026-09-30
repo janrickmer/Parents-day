@@ -12,7 +12,7 @@
 import { h, mount, toast, alertBox, friendlyError } from '../core/ui.js';
 import { updateState, getCurrentState, findClass } from '../core/storage.js';
 import { toMinutes, fromMinutes, formatDate, formatDateWithWeekday, formatRange, formatRanges, availabilityStatus, normalizeRanges, parseIsoDate, WEEKDAYS_SHORT } from '../core/time.js';
-import { savePdf, openPdfForPrint, preloadPdf } from '../core/pdf.js';
+import { savePdf, openPdfInNewTab, preloadPdf } from '../core/pdf.js';
 import { createAppointmentsPdf } from '../pdf/appointments-pdf.js';
 
 const PX = 3; // Pixel pro Minute (10 Minuten = 30 px)
@@ -1300,13 +1300,14 @@ export default function render(ctx) {
     try {
       const result = await createAppointmentsPdf(getCurrentState() || state, classId);
       const name = savePdf(result.doc, result.filename);
-      let printed = false;
+      // Herunterladen und zusätzlich im neuen Tab anzeigen (ohne automatischen Druckdialog)
+      let opened = false;
       try {
-        printed = openPdfForPrint(result.doc, w);
+        opened = openPdfInNewTab(result.doc, w);
       } catch {
-        printed = false;
+        opened = false;
       }
-      if (!printed) w?.close();
+      if (!opened) w?.close();
       const pages = result.appointmentCount === 1 ? '1 Terminbestätigung' : `${result.appointmentCount} Terminbestätigungen`;
       mount(
         messages,
@@ -1314,7 +1315,9 @@ export default function render(ctx) {
           'success',
           h('strong', {}, 'Termine gespeichert. '),
           `Die Datei „${name}“ mit ${pages} und der Übersicht für Sie wurde heruntergeladen.`,
-          printed ? ' Zum Drucken wurde sie außerdem in einem neuen Tab geöffnet.' : ' Öffnen Sie die Datei zum Drucken aus Ihrem Download-Ordner.',
+          opened
+            ? ' Sie ist außerdem in einem neuen Tab geöffnet. Zum Drucken nutzen Sie dort den Druckbefehl Ihres Browsers.'
+            : ' Öffnen Sie die Datei zum Drucken aus Ihrem Download-Ordner.',
         ),
       );
     } catch (err) {
