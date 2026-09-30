@@ -7,7 +7,7 @@
 //   teacher: { firstName, lastName, birthDate: 'JJJJ-MM-TT', email, registrationCode, teacherCode },
 //   event: null | {
 //     schoolAddress: string,                    // mehrzeilig möglich
-//     slotMinutes: number,                      // Standardlänge eines Terminslots
+//     slotMinutes: number,                      // Terminlänge (Standard für neue Termine)
 //     days: [{ date: 'JJJJ-MM-TT', start: 'HH:MM', end: 'HH:MM' }]   // nach Datum sortiert
 //   },
 //   classes: [{                                  // nach Jahrgang und Buchstabe sortiert
@@ -26,14 +26,31 @@
 //   }]
 // }
 
-import { APP_NAME, DATA_VERSION } from '../config.js';
+import { APP_NAME, DATA_VERSION, MAX_EVENT_DAYS, SLOT_MIN, SLOT_MAX } from '../config.js';
+import { isValidIsoDate, codesEqual } from './codes.js';
+import { isValidTime, toMinutes, cleanAvailability } from './time.js';
 
 const TEACHER_PREFIX = 'parentsday.teacher.';
 const SESSION_KEY = 'parentsday.session';
 const PARENT_KEY = 'parentsday.parent';
+const PARENT_TAB_KEY = 'parentsday.parentTab';
+const DRAFT_PREFIX = 'parentsday.eventDraft.';
+
+/** Meldung, wenn der Browser nichts mehr speichern kann. */
+export const STORAGE_FULL = 'Speichern im Browser nicht möglich (Speicher voll oder gesperrt). Ihre letzte Änderung ist nicht gespeichert. Bitte laden Sie über „Zwischenstand speichern“ einen Zwischenstand herunter.';
 
 const listeners = new Set();
 let memoryFallback = new Map();
+
+/** Ist der Speicher überhaupt zugänglich? (In manchen Browsern wirft schon das Lesen.) */
+function storageUsable(store) {
+  try {
+    store.getItem(SESSION_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function storageGet(store, key) {
   try {
@@ -43,11 +60,22 @@ function storageGet(store, key) {
   }
 }
 
+/**
+ * Schreibt in den Speicher. Ist der Speicher gar nicht zugänglich, wird nur im Arbeitsspeicher gemerkt.
+ * Ist er voll (oder das Schreiben gesperrt), wird ein Fehler mit verständlicher Meldung geworfen –
+ * sonst meldete die Seite „gespeichert“, obwohl nach dem Neuladen alles fehlt.
+ */
 function storageSet(store, key, value) {
   try {
     store.setItem(key, value);
-  } catch {
-    memoryFallback.set(key, value);
+  } catch (err) {
+    if (!storageUsable(store)) {
+      memoryFallback.set(key, value);
+      return;
+    }
+    const error = new Error(STORAGE_FULL);
+    error.cause = err;
+    throw error;
   }
 }
 
@@ -56,6 +84,18 @@ function storageRemove(store, key) {
     store.removeItem(key);
   } catch {
     memoryFallback.delete(key);
+  }
+}
+
+/** Werden Daten in diesem Browser dauerhaft gespeichert (localStorage nutzbar)? */
+export function isPersistentStorage() {
+  try {
+    const probe = 'parentsday.probe';
+    localStorage.setItem(probe, '1');
+    localStorage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -86,7 +126,11 @@ export function loadTeacherState(teacherCode) {
   }
 }
 
-/** Speichert den Zustand, aktualisiert savedAt und informiert alle Beobachter. */
+/**
+ * Speichert den Zustand, aktualisiert savedAt und informiert alle Beobachter.
+ * Wirft einen Fehler (STORAGE_FULL), wenn der Browser nicht speichern kann – die Beobachter
+ * („Automatisch gespeichert“) werden dann nicht benachrichtigt.
+ */
 export function saveTeacherState(state) {
   state.savedAt = new Date().toISOString();
   sortClasses(state);
@@ -101,9 +145,29 @@ export function saveTeacherState(state) {
   return state;
 }
 
-/** Löscht alle Daten einer Lehrkraft aus diesem Browser. */
+/** Schlüssel im localStorage, unter dem der Zustand einer Lehrkraft liegt. */
+export function teacherStorageKey(teacherCode) {
+  return TEACHER_PREFIX + teacherCode;
+}
+
+/**
+ * Löscht alle Daten einer Lehrkraft aus diesem Browser – auch Stände, die (z. B. aus einer von Hand
+ * veränderten Datei) unter einer anderen Schreibweise desselben Codes liegen.
+ */
 export function deleteTeacherState(teacherCode) {
   storageRemove(localStorage, TEACHER_PREFIX + teacherCode);
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    for (const key of keys) {
+      if (key?.startsWith(TEACHER_PREFIX) && codesEqual(key.slice(TEACHER_PREFIX.length), teacherCode)) localStorage.removeItem(key);
+    }
+  } catch {
+    // Speicher nicht zugänglich – nichts weiter zu löschen
+  }
+  for (const key of [...memoryFallback.keys()]) {
+    if (key.startsWith(TEACHER_PREFIX) && codesEqual(key.slice(TEACHER_PREFIX.length), teacherCode)) memoryFallback.delete(key);
+  }
 }
 
 /** Beobachter für Änderungen am Zustand. Gibt eine Abmelde-Funktion zurück. */
@@ -119,11 +183,17 @@ export function getSession() {
 }
 
 export function setSession(teacherCode) {
-  storageSet(sessionStorage, SESSION_KEY, teacherCode);
+  try {
+    storageSet(sessionStorage, SESSION_KEY, teacherCode);
+  } catch {
+    // sessionStorage voll: Anmeldung gilt dann nur bis zum Neuladen
+    memoryFallback.set(SESSION_KEY, teacherCode);
+  }
 }
 
 export function clearSession() {
   storageRemove(sessionStorage, SESSION_KEY);
+  memoryFallback.delete(SESSION_KEY);
 }
 
 /** Zustand der angemeldeten Lehrkraft oder null. */
@@ -134,6 +204,7 @@ export function getCurrentState() {
 
 /**
  * Ändert den Zustand der angemeldeten Lehrkraft und speichert ihn.
+ * Wirft einen Fehler, wenn nicht gespeichert werden konnte (dann bleibt der alte Stand erhalten).
  * @param {(state: object) => void} mutator
  */
 export function updateState(mutator) {
@@ -158,68 +229,189 @@ function sortClasses(state) {
   state.classes.sort((a, b) => a.grade - b.grade || a.letter.localeCompare(b.letter));
 }
 
-/** Ergänzt fehlende Felder, damit auch ältere/unvollständige Daten sicher verwendbar sind. */
+// --- Prüfen und Vereinheitlichen gespeicherter Daten ---
+// Der Zustand stammt aus dem localStorage oder aus einer (evtl. von Hand veränderten) Datei.
+// Ungültige Einträge werden verworfen, damit keine Seite an kaputten Daten scheitert.
+
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const text = (v, max = 500) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '').slice(0, max);
+
+function normalizeEvent(ev) {
+  if (!isObject(ev)) return null;
+  const slot = Number(ev.slotMinutes);
+  const seen = new Set();
+  const days = (Array.isArray(ev.days) ? ev.days : [])
+    .filter((d) => isObject(d) && isValidIsoDate(d.date) && isValidTime(d.start) && isValidTime(d.end) && toMinutes(d.end) > toMinutes(d.start))
+    .filter((d) => !seen.has(d.date) && seen.add(d.date))
+    .map((d) => ({ date: d.date, start: d.start, end: d.end }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, MAX_EVENT_DAYS);
+  return {
+    schoolAddress: text(ev.schoolAddress, 2000),
+    slotMinutes: Number.isInteger(slot) && slot >= SLOT_MIN && slot <= SLOT_MAX && slot % 5 === 0 ? slot : 10,
+    days,
+  };
+}
+
+function normalizeResponse(r) {
+  if (!isObject(r) || !isObject(r.availability)) return null;
+  return { submittedAt: text(r.submittedAt, 40), availability: cleanAvailability(r.availability) };
+}
+
+function normalizeAppointment(a) {
+  if (!isObject(a) || !isValidIsoDate(a.date) || !isValidTime(a.start)) return null;
+  const duration = Number(a.duration);
+  return { date: a.date, start: a.start, duration: Number.isInteger(duration) && duration >= 1 && duration <= 1440 ? duration : 10 };
+}
+
+function normalizeClasses(list) {
+  const classes = [];
+  const ids = new Set();
+  for (const c of Array.isArray(list) ? list : []) {
+    if (!isObject(c)) continue;
+    const grade = Number(c.grade);
+    const letter = text(c.letter, 1).toLowerCase();
+    if (!Number.isInteger(grade) || grade < 1 || grade > 13 || !/^[a-h]$/.test(letter)) continue;
+    const id = `${grade}${letter}`;
+    if (ids.has(id)) continue;
+    ids.add(id);
+    const studentIds = new Set();
+    const students = (Array.isArray(c.students) ? c.students : []).filter(isObject).map((st) => {
+      let sid = text(st.id, 60);
+      if (!sid || studentIds.has(sid)) sid = newId();
+      studentIds.add(sid);
+      return {
+        id: sid,
+        lastName: text(st.lastName, 200),
+        firstName: text(st.firstName, 200),
+        code: text(st.code, 120),
+        response: normalizeResponse(st.response),
+        appointment: normalizeAppointment(st.appointment),
+      };
+    });
+    classes.push({ id, grade, letter, codesGenerated: Boolean(c.codesGenerated), students });
+  }
+  return classes;
+}
+
+/** Prüft einen gespeicherten Stand und ergänzt fehlende Felder. Wirft bei unbrauchbaren Daten. */
 export function normalizeTeacherState(raw) {
-  if (!raw || typeof raw !== 'object' || !raw.teacher || !raw.teacher.teacherCode) {
+  if (!isObject(raw) || !isObject(raw.teacher) || !text(raw.teacher.teacherCode, 60)) {
     throw new Error('Die Daten sind kein gültiger ParentsDay-Stand.');
   }
+  const t = raw.teacher;
+  const savedAt = text(raw.savedAt, 40);
   const state = {
     app: APP_NAME,
     type: 'teacher-state',
     version: DATA_VERSION,
-    savedAt: raw.savedAt || new Date().toISOString(),
-    teacher: { email: '', ...raw.teacher },
-    event: raw.event
-      ? {
-          schoolAddress: raw.event.schoolAddress || '',
-          slotMinutes: Number(raw.event.slotMinutes) || 10,
-          days: Array.isArray(raw.event.days)
-            ? raw.event.days.map((d) => ({ date: d.date, start: d.start, end: d.end })).sort((a, b) => a.date.localeCompare(b.date))
-            : [],
-        }
-      : null,
-    classes: Array.isArray(raw.classes)
-      ? raw.classes.map((c) => ({
-          id: c.id || `${c.grade}${c.letter}`,
-          grade: Number(c.grade),
-          letter: String(c.letter).toLowerCase(),
-          codesGenerated: Boolean(c.codesGenerated),
-          students: Array.isArray(c.students)
-            ? c.students.map((s) => ({
-                id: s.id || newId(),
-                lastName: s.lastName || '',
-                firstName: s.firstName || '',
-                code: s.code || '',
-                response: s.response && s.response.availability ? { submittedAt: s.response.submittedAt || '', availability: s.response.availability } : null,
-                appointment: s.appointment && s.appointment.date ? { date: s.appointment.date, start: s.appointment.start, duration: Number(s.appointment.duration) || 10 } : null,
-              }))
-            : [],
-        }))
-      : [],
+    savedAt: savedAt && !Number.isNaN(Date.parse(savedAt)) ? savedAt : new Date().toISOString(),
+    teacher: {
+      firstName: text(t.firstName, 200),
+      lastName: text(t.lastName, 200),
+      birthDate: text(t.birthDate, 10),
+      email: text(t.email, 254),
+      registrationCode: text(t.registrationCode, 60),
+      teacherCode: text(t.teacherCode, 60),
+    },
+    event: normalizeEvent(raw.event),
+    classes: normalizeClasses(raw.classes),
   };
   sortClasses(state);
   return state;
 }
 
-// --- Elternseite ---
-// ParentState: { event: EventInfo|null, login: {firstName,lastName,code}|null, selection: {'JJJJ-MM-TT': [slotStartMinuten…]},
-//                submittedAt?: string, lastPayload?: ResponsePayload, lastFilename?: string, teacherEmailInput?: string }
+// --- Noch nicht gespeicherte Eingaben auf „Elternsprechtag erstellen“ / „Weitere Einstellungen“ ---
+// Sie liegen bis zum Absenden nur in diesem Tab (sessionStorage) und kommen mit in den Zwischenspeicher.
+// `base` ist der gespeicherte Stand, auf dem der Entwurf beruht – passt er nicht mehr, gilt der Entwurf nicht.
 
-export function loadParentState() {
-  const raw = storageGet(localStorage, PARENT_KEY);
-  if (!raw) return { event: null, login: null, selection: {} };
+const draftListeners = new Set();
+let draftPending = false;
+
+/** Gespeicherter Stand, auf dem ein Entwurf beruht. */
+export function eventDraftBase(state) {
+  return JSON.stringify({ event: state.event || null, email: state.teacher.email || '' });
+}
+
+/** Rohdaten des Entwurfs der angemeldeten Lehrkraft, wenn er zum Stand `state` passt (sonst null). */
+export function loadEventDraft(state) {
   try {
-    const parsed = JSON.parse(raw);
-    return { event: null, login: null, selection: {}, ...parsed };
+    const data = JSON.parse(storageGet(sessionStorage, DRAFT_PREFIX + state.teacher.teacherCode) || 'null');
+    if (!data || data.base !== eventDraftBase(state) || !isObject(data.draft) || !Array.isArray(data.draft.days)) return null;
+    return data.draft;
   } catch {
-    return { event: null, login: null, selection: {} };
+    return null;
   }
 }
 
-export function saveParentState(parentState) {
-  storageSet(localStorage, PARENT_KEY, JSON.stringify(parentState));
+export function storeEventDraft(state, draft) {
+  try {
+    storageSet(sessionStorage, DRAFT_PREFIX + state.teacher.teacherCode, JSON.stringify({ base: eventDraftBase(state), draft }));
+  } catch {
+    // Speicher nicht verfügbar – dann gehen ungespeicherte Eingaben beim Neuladen verloren.
+  }
 }
 
+export function clearEventDraft(state) {
+  storageRemove(sessionStorage, DRAFT_PREFIX + state.teacher.teacherCode);
+}
+
+/** Meldet, ob auf der aktuellen Seite ungespeicherte Eingaben stehen (für die Anzeige in der Kopfzeile). */
+export function setDraftPending(pending) {
+  if (draftPending === Boolean(pending)) return;
+  draftPending = Boolean(pending);
+  for (const fn of draftListeners) fn(draftPending);
+}
+
+export function isDraftPending() {
+  return draftPending;
+}
+
+export function onDraftPendingChange(fn) {
+  draftListeners.add(fn);
+  return () => draftListeners.delete(fn);
+}
+
+// --- Elternseite ---
+// ParentState: { event: EventInfo|null, login: {firstName,lastName,code}|null, selection: {'JJJJ-MM-TT': [slotStartMinuten…]},
+//                submittedAt?: string, lastPayload?: ResponsePayload, lastFilename?: string,
+//                teacherEmailInput?: string, teacherEmailFor?: string }
+// Jeder Tab arbeitet mit seinem eigenen Stand (sessionStorage) – Eltern mit mehreren Kindern öffnen
+// die QR-Codes oft in mehreren Tabs; so vermischen sich die Angaben nicht. Zusätzlich wird der zuletzt
+// gespeicherte Stand im localStorage abgelegt: ein neuer Tab (oder ein späterer Besuch) beginnt damit.
+
+function parseParentState(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return isObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function loadParentState() {
+  const own = parseParentState(storageGet(sessionStorage, PARENT_TAB_KEY));
+  const parsed = own || parseParentState(storageGet(localStorage, PARENT_KEY));
+  return { event: null, login: null, selection: {}, ...(parsed || {}) };
+}
+
+export function saveParentState(parentState) {
+  const json = JSON.stringify(parentState);
+  // Die Elternseite speichert bei jedem Tippen – ein voller Speicher darf sie nicht stören.
+  for (const [store, key] of [[sessionStorage, PARENT_TAB_KEY], [localStorage, PARENT_KEY]]) {
+    try {
+      storageSet(store, key, json);
+    } catch (err) {
+      console.warn(err);
+    }
+  }
+}
+
+/** Löscht den Stand dieses Tabs – den eines anderen Kindes (aus einem anderen Tab) aber nicht. */
 export function clearParentState() {
-  storageRemove(localStorage, PARENT_KEY);
+  const own = parseParentState(storageGet(sessionStorage, PARENT_TAB_KEY));
+  storageRemove(sessionStorage, PARENT_TAB_KEY);
+  const shared = parseParentState(storageGet(localStorage, PARENT_KEY));
+  if (!shared?.login || !own?.login || shared.login.code === own.login.code) storageRemove(localStorage, PARENT_KEY);
 }

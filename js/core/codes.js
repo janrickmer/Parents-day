@@ -120,33 +120,71 @@ export function parseStudentCode(code) {
   };
 }
 
+/** Anfangsbuchstabe eines Lehrkräftecodes zum Vergleichen: ohne Akzente (Ł→L, Ç→C), großgeschrieben;
+ * „I“ und „l“ sehen in vielen Schriften gleich aus und gelten deshalb als gleich. */
+function initialKey(ch) {
+  const plain = transliterate(ch).charAt(0).toUpperCase() || String(ch).toLocaleUpperCase('de-DE');
+  return plain === 'I' ? 'L' : plain;
+}
+
+/** Vergleichbare Form eines Lehrkräftecodes (siehe initialKey). */
+export function teacherCodeKey(code) {
+  const clean = normalizeCodeInput(code);
+  const m = /^(\p{L})(\d+)(\p{L})$/u.exec(clean);
+  if (!m) return clean.toLocaleUpperCase('de-DE');
+  return `${initialKey(m[1])}${m[2]}${initialKey(m[3])}`;
+}
+
+/**
+ * Gehören zwei Lehrkräftecodes zusammen? Wie codesEqual, aber tolerant bei den Anfangsbuchstaben:
+ * „L“ statt „Ł“, „Z“ statt „Ż“ oder „l“ statt „I“ (abgetippt aus dem Elternbrief) gelten als gleich.
+ */
+export function teacherCodesMatch(a, b) {
+  const key = teacherCodeKey(a);
+  return key !== '' && key === teacherCodeKey(b);
+}
+
+/** Gehören zwei Schülercodes zum selben Kind (Klasse, Lehrkräftecode tolerant, Zahlencode)? */
+export function studentCodesMatch(a, b) {
+  const pa = parseStudentCode(a);
+  const pb = parseStudentCode(b);
+  if (!pa || !pb) return codesEqual(a, b);
+  return pa.classId === pb.classId && pa.nameCode === pb.nameCode && teacherCodesMatch(pa.teacherCode, pb.teacherCode);
+}
+
+/** Hinweis, wenn ein Code zu einem anderen Elternbrief gehört als der geöffnete Link. */
+const OTHER_LETTER_HINT = 'Bitte scannen Sie den QR-Code aus dem Elternbrief dieses Kindes – oder geben Sie den Termin-Schlüssel aus diesem Brief ein.';
+
 /**
  * Prüft die Eltern-Anmeldung (Vorname, Nachname, Code des Kindes).
  * @param {{firstName:string, lastName:string, code:string}} input
  * @param {{teacherCode?:string, classId?:string}} [expected] – bekannte Daten aus dem Elternbrief-Link
- * @returns {{ok:true, parsed:object, code:string} | {ok:false, error:string}}
+ * @returns {{ok:true, parsed:object, code:string} | {ok:false, error:string, reason:string}}
+ *   reason: 'names' | 'code' | 'format' | 'name-code' | 'teacher' | 'class'
  */
 export function checkStudentLogin({ firstName, lastName, code }, expected = {}) {
   if (!cleanName(firstName) || !cleanName(lastName)) {
-    return { ok: false, error: 'Bitte Vor- und Nachnamen des Kindes eingeben.' };
+    return { ok: false, reason: 'names', error: 'Bitte geben Sie Vor- und Nachnamen des Kindes ein.' };
   }
   if (!normalizeCodeInput(code)) {
-    return { ok: false, error: 'Bitte den Code aus dem Elternbrief eingeben.' };
+    return { ok: false, reason: 'code', error: 'Bitte geben Sie den Code aus dem Elternbrief ein.' };
   }
   const parsed = parseStudentCode(code);
   if (!parsed) {
-    return { ok: false, error: 'Der Code hat nicht das erwartete Format. Bitte genau so eingeben, wie er im gelben Kasten des Elternbriefs steht.' };
+    return { ok: false, reason: 'format', error: 'Der Code hat nicht das erwartete Format. Bitte geben Sie ihn genau so ein, wie er im gelben Kasten des Elternbriefs steht.' };
   }
   if (parsed.nameCode !== studentNameCode(firstName, lastName)) {
-    return { ok: false, error: 'Name und Code passen nicht zusammen. Bitte Vor- und Nachnamen genau wie im Elternbrief eingeben.' };
+    return { ok: false, reason: 'name-code', error: 'Name und Code passen nicht zusammen. Bitte geben Sie Vor- und Nachnamen genau wie im Elternbrief ein.' };
   }
-  if (expected.teacherCode && !codesEqual(parsed.teacherCode, expected.teacherCode)) {
-    return { ok: false, error: 'Dieser Code gehört zu einer anderen Lehrkraft als der geöffnete Link. Bitte den QR-Code des passenden Elternbriefs verwenden.' };
+  if (expected.teacherCode && !teacherCodesMatch(parsed.teacherCode, expected.teacherCode)) {
+    return { ok: false, reason: 'teacher', error: `Dieser Code gehört zu einem anderen Elternbrief (andere Lehrkraft) als der geöffnete Link. ${OTHER_LETTER_HINT}` };
   }
   if (expected.classId && parsed.classId !== String(expected.classId).toLowerCase()) {
-    return { ok: false, error: `Dieser Code gehört nicht zur Klasse ${expected.classId}.` };
+    return { ok: false, reason: 'class', error: `Dieser Code gehört nicht zur Klasse ${expected.classId}. ${OTHER_LETTER_HINT}` };
   }
-  return { ok: true, parsed, code: canonicalStudentCode(parsed) };
+  // Mit bekanntem Lehrkräftecode gilt dessen Schreibweise (z. B. „Ł“ statt abgetipptem „L“).
+  const canonical = expected.teacherCode ? { ...parsed, teacherCode: String(expected.teacherCode) } : parsed;
+  return { ok: true, parsed: canonical, code: canonicalStudentCode(canonical) };
 }
 
 /** Schreibweise eines Codes wie von der Lehrkraft erzeugt (Klassenbuchstabe klein, Initialen groß). */

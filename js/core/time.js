@@ -117,6 +117,38 @@ export function normalizeRanges(ranges) {
   return merged;
 }
 
+const TIME_RE = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Ist der Wert eine Uhrzeit "HH:MM" zwischen 00:00 und 24:00? */
+export function isValidTime(value) {
+  return typeof value === 'string' && TIME_RE.test(value);
+}
+
+/**
+ * Prüft und vereinheitlicht Verfügbarkeiten { 'JJJJ-MM-TT': [['HH:MM','HH:MM'], …] } aus fremden Daten
+ * (Rückmeldung, Zwischenspeicher). Ungültiges wird verworfen; die Menge ist begrenzt, damit eine
+ * manipulierte Datei den Browser nicht lahmlegt (8 Tage × 288 Fünf-Minuten-Spannen).
+ */
+export function cleanAvailability(raw, { maxDays = 8, maxRanges = 288 } = {}) {
+  const result = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
+  const dates = Object.keys(raw)
+    .filter((date) => ISO_DATE_RE.test(date) && Array.isArray(raw[date]))
+    .sort()
+    .slice(0, maxDays);
+  for (const date of dates) {
+    const list = [];
+    for (const r of raw[date]) {
+      if (list.length >= maxRanges) break;
+      if (!Array.isArray(r) || r.length !== 2 || !isValidTime(r[0]) || !isValidTime(r[1])) continue;
+      if (toMinutes(r[1]) > toMinutes(r[0])) list.push([r[0], r[1]]);
+    }
+    result[date] = list;
+  }
+  return result;
+}
+
 /**
  * Bewertet einen Termin gegen die Verfügbarkeit der Eltern.
  * @param {Array<[string,string]>|undefined|null} ranges – verfügbare Zeitspannen des Tages

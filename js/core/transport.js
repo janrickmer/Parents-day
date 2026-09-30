@@ -5,7 +5,8 @@
 //     zusätzlich als Textblock „PARENTSDAY[…]“ im E-Mail-Text.
 
 import { PUBLIC_URL } from '../config.js';
-import { toMinutes, fromMinutes } from './time.js';
+import { toMinutes, fromMinutes, cleanAvailability } from './time.js';
+import { teacherCodeKey } from './codes.js';
 
 // ---------- Base64url (UTF-8) ----------
 
@@ -90,10 +91,15 @@ export function decodeEventParam(param) {
 // ---------- Termin-Schlüssel (abtippbar, Crockford-Base32) ----------
 // Bit-Layout: Version(2) | Slotlänge/5 (5) | Anzahl Tage−1 (3) | je Tag: Tage seit 01.01.2024 (14),
 // Beginn/5 (9), Ende/5 (9) | Prüfsumme (10). Uhrzeiten müssen daher auf 5 Minuten enden.
+// Version 2 (Elternbriefe): In die Prüfsumme geht zusätzlich eine Kennung aus Lehrkräftecode und
+// Klasse ein. Der Schlüssel passt dadurch nur zu Codes dieses Elternbriefs – ein Tippfehler im
+// Lehrkräftecode des Kindes fällt sofort auf, ohne dass der Schlüssel länger wird.
+// Version 1 (ältere Briefe) prüft nur den Schlüssel selbst.
 
 const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const EPOCH_UTC = Date.UTC(2024, 0, 1);
 const DAY_MS = 86400000;
+const KEY_INVALID = 'Der Termin-Schlüssel ist ungültig. Bitte tippen Sie ihn genau wie im Elternbrief ab.';
 
 function dayOffset(iso) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -103,6 +109,21 @@ function dayOffset(iso) {
 function isoFromOffset(offset) {
   const dt = new Date(EPOCH_UTC + offset * DAY_MS);
   return dt.toISOString().slice(0, 10);
+}
+
+/** Kennung (0–1020) aus Lehrkräftecode und Klasse für die Prüfsumme (FNV-1a). */
+function ownerTag({ teacherCode, classId }) {
+  const text = `${teacherCodeKey(teacherCode)}|${String(classId || '').toLowerCase()}`;
+  let hash = 0x811c9dc5;
+  for (const ch of text) {
+    hash ^= ch.codePointAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % 1021;
+}
+
+function hasOwner(owner) {
+  return Boolean(owner && owner.teacherCode && owner.classId);
 }
 
 /** Prüft, ob sich ein Elternsprechtag als Termin-Schlüssel darstellen lässt. */
@@ -118,14 +139,19 @@ export function canEncodeEventKey(event) {
   });
 }
 
-/** Erzeugt den Termin-Schlüssel, z. B. "1A2B-3C4D-5E6". Gibt '' zurück, wenn nicht darstellbar. */
-export function encodeEventKey(event) {
+/**
+ * Erzeugt den Termin-Schlüssel, z. B. "1A2B-3C4D-5E6". Gibt '' zurück, wenn nicht darstellbar.
+ * @param {object} event – { slotMinutes, days }
+ * @param {{teacherCode:string, classId:string}} [owner] – Lehrkraft und Klasse des Elternbriefs (Version 2)
+ */
+export function encodeEventKey(event, owner = null) {
   if (!canEncodeEventKey(event)) return '';
+  const version = hasOwner(owner) ? 2 : 1;
   let value = 0n;
   const push = (num, bits) => {
     value = (value << BigInt(bits)) | BigInt(num);
   };
-  push(1, 2);
+  push(version, 2);
   push(event.slotMinutes / 5, 5);
   push(event.days.length - 1, 3);
   for (const d of event.days) {
@@ -133,7 +159,7 @@ export function encodeEventKey(event) {
     push(toMinutes(d.start) / 5, 9);
     push(toMinutes(d.end) / 5, 9);
   }
-  const check = Number(value % 1021n);
+  const check = (Number(value % 1021n) + (version === 2 ? ownerTag(owner) : 0)) % 1021;
   push(check, 10);
   const totalBits = 2 + 5 + 3 + event.days.length * 32 + 10;
   const chars = Math.ceil(totalBits / 5);
@@ -143,14 +169,19 @@ export function encodeEventKey(event) {
   return out.match(/.{1,4}/g).join('-');
 }
 
-/** Liest einen Termin-Schlüssel. Wirft einen Fehler bei Tippfehlern. */
-export function decodeEventKey(text) {
+/**
+ * Liest einen Termin-Schlüssel. Wirft einen Fehler bei Tippfehlern.
+ * @param {string} text
+ * @param {{teacherCode:string, classId:string}} [owner] – aus dem Code des Kindes; nötig für Schlüssel
+ *   der Version 2. Passt der Schlüssel nicht zu Lehrkraft und Klasse, hat der Fehler `mismatch: true`.
+ */
+export function decodeEventKey(text, owner = null) {
   const clean = String(text ?? '')
     .toUpperCase()
     .replace(/[\s\-–]+/g, '')
     .replace(/[IL]/g, '1')
     .replace(/O/g, '0');
-  const error = new Error('Der Termin-Schlüssel ist ungültig. Bitte genau wie im Elternbrief abtippen.');
+  const error = new Error(KEY_INVALID);
   if (!clean || /[^0-9A-Z]/.test(clean) || /U/.test(clean)) throw error;
   let value = 0n;
   for (const ch of clean) {
@@ -168,14 +199,27 @@ export function decodeEventKey(text) {
   const take = (bits, offsetFromTop) => Number((value >> BigInt(totalBits - offsetFromTop - bits)) & ((1n << BigInt(bits)) - 1n));
   const check = take(10, totalBits - 10);
   const data = value >> 10n;
-  if (Number(data % 1021n) !== check) throw error;
   let pos = 0;
   const read = (bits) => {
     const v = take(bits, pos);
     pos += bits;
     return v;
   };
-  if (read(2) !== 1) throw error;
+  const version = read(2);
+  if (version === 1) {
+    if (Number(data % 1021n) !== check) throw error;
+  } else if (version === 2) {
+    if (!hasOwner(owner) || (Number(data % 1021n) + ownerTag(owner)) % 1021 !== check) {
+      const classId = owner?.classId ? `„${owner.classId}“` : 'der Klasse';
+      const mismatch = new Error(
+        `Termin-Schlüssel und Code passen nicht zusammen. Bitte prüfen Sie den Termin-Schlüssel und im Code die Buchstaben und Ziffern direkt nach ${classId} – beides muss genau wie im Elternbrief sein.`,
+      );
+      mismatch.mismatch = true;
+      throw mismatch;
+    }
+  } else {
+    throw error;
+  }
   const slotMinutes = read(5) * 5;
   const count = read(3) + 1;
   if (count !== days || slotMinutes < 5) throw error;
@@ -223,28 +267,27 @@ export function buildResponsePayload({ code, firstName, lastName, classId, teach
   };
 }
 
-/** Prüft und vereinheitlicht eine Rückmeldung. Gibt null zurück, wenn es keine gültige Rückmeldung ist. */
+/**
+ * Prüft und vereinheitlicht eine Rückmeldung. Gibt null zurück, wenn es keine gültige Rückmeldung ist.
+ * Die Verfügbarkeit ist begrenzt (höchstens 8 Tage, je Tag 288 Zeitspannen, nur gültige Uhrzeiten).
+ */
 export function validateResponsePayload(obj) {
-  if (!obj || obj.app !== 'ParentsDay' || obj.type !== 'parent-response' || !obj.code || typeof obj.availability !== 'object') return null;
-  const availability = {};
-  for (const [date, ranges] of Object.entries(obj.availability || {})) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(ranges)) continue;
-    availability[date] = ranges
-      .filter((r) => Array.isArray(r) && r.length === 2 && toMinutes(r[1]) > toMinutes(r[0]))
-      .map(([s, e]) => [String(s), String(e)]);
-  }
+  if (!obj || obj.app !== 'ParentsDay' || obj.type !== 'parent-response' || !obj.code || typeof obj.code !== 'string') return null;
+  if (!obj.availability || typeof obj.availability !== 'object') return null;
+  const text = (value, max = 200) => (typeof value === 'string' || typeof value === 'number' ? String(value).slice(0, max) : '');
+  const slot = Number(obj.slotMinutes);
   return {
     app: 'ParentsDay',
     type: 'parent-response',
     v: 1,
-    code: String(obj.code),
-    firstName: String(obj.firstName || ''),
-    lastName: String(obj.lastName || ''),
-    classId: String(obj.classId || ''),
-    teacherCode: String(obj.teacherCode || ''),
-    submittedAt: String(obj.submittedAt || ''),
-    slotMinutes: Number(obj.slotMinutes) || 0,
-    availability,
+    code: text(obj.code, 120),
+    firstName: text(obj.firstName),
+    lastName: text(obj.lastName),
+    classId: text(obj.classId, 10),
+    teacherCode: text(obj.teacherCode, 60),
+    submittedAt: text(obj.submittedAt, 40),
+    slotMinutes: Number.isInteger(slot) && slot > 0 && slot <= 1440 ? slot : 0,
+    availability: cleanAvailability(obj.availability),
   };
 }
 

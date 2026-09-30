@@ -3,7 +3,8 @@
 /**
  * Erzeugt ein DOM-Element.
  *   h('button', { class: 'btn btn-primary', onclick: fn, disabled: true }, 'Text', otherNode)
- * Attribute: class, style (String oder Objekt), dataset (Objekt), on<event> (Funktion),
+ * Attribute: class, style (nur als Objekt – die Content-Security-Policy erlaubt keine Stil-Texte),
+ * dataset (Objekt), on<event> (Funktion),
  * boolesche Attribute (true/false), alle anderen als Attribut. Kinder: Strings, Nodes, Arrays, null/false.
  */
 export function h(tag, attrs = {}, ...children) {
@@ -42,27 +43,59 @@ export function mount(el, ...children) {
 let toastHost = null;
 
 /**
- * Kurzer Hinweis unten rechts.
+ * Kurzer Hinweis (unten rechts, auf Smartphones oben). Lässt sich mit × vorzeitig schließen.
  * @param {string} message
  * @param {'info'|'success'|'warning'|'error'} [type]
  */
 export function toast(message, type = 'info', timeout = 4500) {
-  if (!toastHost) {
+  if (!toastHost || !toastHost.isConnected) {
     toastHost = h('div', { class: 'toast-host', role: 'status', 'aria-live': 'polite' });
     document.body.appendChild(toastHost);
   }
-  const el = h('div', { class: `toast toast-${type}` }, message);
-  toastHost.appendChild(el);
-  setTimeout(() => {
+  let timer = 0;
+  const hide = () => {
+    clearTimeout(timer);
     el.classList.add('toast-hide');
     setTimeout(() => el.remove(), 300);
-  }, timeout);
+  };
+  const el = h(
+    'div',
+    { class: `toast toast-${type}` },
+    h('span', { class: 'toast-text' }, message),
+    h('button', { type: 'button', class: 'toast-close', 'aria-label': 'Hinweis schließen', title: 'Schließen', onclick: hide }, h('span', { 'aria-hidden': 'true' }, '×')),
+  );
+  toastHost.appendChild(el);
+  timer = setTimeout(hide, timeout);
+}
+
+/** Entfernt alle Hinweise (z. B. wenn sie nach einem Seitenwechsel nicht mehr stimmen). */
+export function clearToasts() {
+  toastHost?.replaceChildren();
 }
 
 // ---------- Dialoge ----------
 
+// Offene Dialoge (oberster zuletzt). Alles dahinter – die Seite und ältere Dialoge – ist „inert“:
+// nicht anklickbar und mit Tab nicht erreichbar.
+const openDialogs = [];
+
+function setInert(el, on) {
+  if (!el) return;
+  el.inert = on;
+  if (on) el.setAttribute('aria-hidden', 'true');
+  else el.removeAttribute('aria-hidden');
+}
+
+function updateInert() {
+  const top = openDialogs[openDialogs.length - 1];
+  setInert(document.getElementById('app'), Boolean(top));
+  for (const d of openDialogs) setInert(d.backdrop, d !== top);
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
+
 /**
- * Modaler Dialog.
+ * Modaler Dialog. Der Tastaturfokus bleibt im Dialog; Esc schließt nur den obersten Dialog.
  * @param {{title:string, content: Node|string|Array, actions?: Array<{label:string, variant?:string, onClick?:(close:Function)=>void, value?:any}>, onClose?:Function, wide?:boolean}} opts
  * @returns {{close: (value?:any)=>void, result: Promise<any>, element: HTMLElement}}
  */
@@ -70,15 +103,43 @@ export function modal({ title, content, actions = [], onClose, wide = false }) {
   let resolve;
   const result = new Promise((r) => (resolve = r));
   const previouslyFocused = document.activeElement;
+  let closed = false;
+  const entry = {};
   const close = (value) => {
+    if (closed) return;
+    closed = true;
     backdrop.remove();
     document.removeEventListener('keydown', onKey);
-    if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+    const index = openDialogs.indexOf(entry);
+    if (index >= 0) openDialogs.splice(index, 1);
+    updateInert();
+    if (previouslyFocused && previouslyFocused.isConnected && previouslyFocused.focus) previouslyFocused.focus();
     onClose?.(value);
     resolve(value);
   };
   const onKey = (e) => {
-    if (e.key === 'Escape') close(undefined);
+    if (openDialogs[openDialogs.length - 1] !== entry) return;
+    if (e.key === 'Escape') {
+      close(undefined);
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    // Fokus im Kreis führen (auch für Browser ohne „inert“)
+    const items = [...dialog.querySelectorAll(FOCUSABLE)].filter((el) => el.tabIndex >= 0 && (el.offsetParent !== null || el === document.activeElement));
+    if (!items.length) {
+      e.preventDefault();
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const inside = dialog.contains(document.activeElement);
+    if (e.shiftKey && (document.activeElement === first || !inside)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !inside)) {
+      e.preventDefault();
+      first.focus();
+    }
   };
   const titleId = `modal-title-${Math.random().toString(36).slice(2, 8)}`;
   const dialog = h(
@@ -97,7 +158,10 @@ export function modal({ title, content, actions = [], onClose, wide = false }) {
       : null,
   );
   const backdrop = h('div', { class: 'modal-backdrop', onclick: (e) => e.target === backdrop && close(undefined) }, dialog);
+  entry.backdrop = backdrop;
   document.body.appendChild(backdrop);
+  openDialogs.push(entry);
+  updateInert();
   document.addEventListener('keydown', onKey);
   const focusTarget = dialog.querySelector('input, select, textarea, .btn-primary, .btn-danger, button');
   focusTarget?.focus();
@@ -179,7 +243,7 @@ export function safeFilename(name) {
 /** Startet den Download eines Blobs. */
 export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
-  const a = h('a', { href: url, download: filename, style: 'display:none' });
+  const a = h('a', { href: url, download: filename, style: { display: 'none' } });
   document.body.appendChild(a);
   a.click();
   setTimeout(() => {
@@ -198,7 +262,7 @@ export async function copyToClipboard(text) {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    const ta = h('textarea', { style: 'position:fixed;left:-9999px' });
+    const ta = h('textarea', { style: { position: 'fixed', left: '-9999px' } });
     ta.value = text;
     document.body.appendChild(ta);
     ta.select();
@@ -223,4 +287,27 @@ export function field(label, control, { hint = '', id } = {}) {
   const controlId = id || control.id || `f-${Math.random().toString(36).slice(2, 9)}`;
   control.id = controlId;
   return h('div', { class: 'field' }, h('label', { for: controlId }, label), control, hint ? h('div', { class: 'field-hint' }, hint) : null);
+}
+
+// ---------- Fehlermeldungen ----------
+
+const NETWORK_RE = /failed to fetch|dynamically imported module|importing a module script failed|error loading dynamically|networkerror|network request failed|load failed|internetverbindung/i;
+const TECHNICAL_RE = /\b(cannot|undefined|null|is not|not a function|unexpected|failed|invalid|error|exception|of undefined)\b/i;
+
+/** Ist ein Fehler durch eine fehlende Internetverbindung entstanden (fetch, dynamischer Import)? */
+export function isNetworkError(err) {
+  const msg = err?.message || String(err || '');
+  return NETWORK_RE.test(msg);
+}
+
+/**
+ * Fehler als verständlicher deutscher Text. Netzwerkfehler werden umschrieben, technische (englische)
+ * Meldungen nicht angezeigt – eigene Meldungen von ParentsDay bleiben unverändert.
+ */
+export function friendlyError(err, fallback = 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es noch einmal.') {
+  const msg = err?.message || String(err || '');
+  if (/internetverbindung/i.test(msg)) return msg;
+  if (isNetworkError(err)) return 'Keine Verbindung zum Internet. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.';
+  if (!msg || (TECHNICAL_RE.test(msg) && !/[äöüßÄÖÜ„“]/.test(msg))) return fallback;
+  return msg;
 }
