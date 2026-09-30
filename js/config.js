@@ -9,7 +9,7 @@ export const PUBLIC_URL = 'https://parentsday.janrickmer.de';
  * Rückmeldung dann als PDF bzw. E-Mail-Text. Die Adresse muss auch in index.html bei connect-src stehen
  * (`npm test` prüft das).
  */
-export const MAILBOX_URL = '';
+export const MAILBOX_URL = 'https://parentsday-briefkasten.feindt.workers.dev';
 
 /** Anzeigename – immer mit großem „D“. */
 export const APP_NAME = 'ParentsDay';

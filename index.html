@@ -5,7 +5,7 @@
     <!-- Nur eigene Skripte und Stile; keine fremden Server, kein eval. Stil-Angaben setzt der Code über CSSOM. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://parentsday-briefkasten.feindt.workers.dev; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <!-- Digitaler Briefkasten: Wird MAILBOX_URL in js/config.js gesetzt, gehört dieselbe Adresse (z. B.
          https://parentsday-briefkasten.name.workers.dev) oben zu „connect-src“. Sonst blockiert der Browser jede
