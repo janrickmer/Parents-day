@@ -5,11 +5,14 @@ import { MAX_REGISTRATION_BYTES, NAME_MAX_LENGTH } from '../config.js';
 import { h, mount, toast, field, alertBox, fileDropZone, friendlyError } from '../core/ui.js';
 import { cleanName, initialOf, isValidIsoDate, registrationCode, teacherCode, codesEqual, normalizeCodeInput, isValidEmail, isSameTeacher } from '../core/codes.js';
 import { formatDate, todayIso } from '../core/time.js';
-import { getSession, setSession, clearSession, loadTeacherState, createTeacherState, saveTeacherState, updateState, takeReturnTo } from '../core/storage.js';
+import { getSession, setSession, clearSession, loadTeacherState, createTeacherState, saveTeacherState, updateState, takeReturnTo, isEmptyTeacherState } from '../core/storage.js';
 import { savePdf, extractPayloadFromFile, preloadPdf } from '../core/pdf.js';
 import { createRegistrationPdf } from '../pdf/registration-pdf.js';
 import { markEmptyDevice } from '../components/backup-actions.js';
 import { mailboxEnabled } from '../core/mailbox.js';
+import { cloudEnabled } from '../core/cloud.js';
+import { stopCloudSync, endCloudSession } from '../core/cloud-sync.js';
+import { newPasswordFields, rememberCheckbox, cloudAfterRegister, cloudAfterLogin, openUnlockDialog } from '../components/cloud-ui.js';
 
 const MIN_BIRTH_DATE = '1900-01-01';
 const NOT_REGISTRATION = 'Diese Datei ist keine ParentsDay-Registrierung.';
@@ -187,6 +190,8 @@ function sessionBanner(ctx) {
             type: 'button',
             class: 'btn btn-ghost',
             onclick: () => {
+              endCloudSession(state.teacher.teacherCode);
+              stopCloudSync();
               clearSession();
               toast('Sie wurden abgemeldet.', 'info');
               ctx.rerender();
@@ -200,7 +205,19 @@ function sessionBanner(ctx) {
 }
 
 function privacyNote() {
-  // Mit digitalem Briefkasten liegen Rückmeldungen und Elternbrief-Angaben (verschlüsselt) auch beim Dienst.
+  // Mit Dienst liegen Cloud-Sicherung, Rückmeldungen und Elternbrief-Angaben (verschlüsselt) auch dort.
+  if (cloudEnabled()) {
+    return alertBox(
+      'info',
+      h(
+        'p',
+        {},
+        h('strong', {}, 'Ihre Daten werden in diesem Browser gespeichert und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung.'),
+        ' An einem anderen Gerät melden Sie sich einfach an und geben Ihr Passwort ein. Niemand sonst kann Ihre Daten lesen. ',
+        h('a', { href: '#/datenschutz' }, 'Mehr zum Datenschutz'),
+      ),
+    );
+  }
   const withMailbox = mailboxEnabled();
   return alertBox(
     'info',
@@ -291,6 +308,9 @@ function renderRegister(ctx) {
         : 'An diese Adresse schicken Eltern ihre Rückmeldungen.',
     }),
   };
+  // Passwort für die Cloud-Sicherung (nur mit Dienst)
+  const pw = cloudEnabled() ? newPasswordFields('reg') : null;
+  const remember = cloudEnabled() ? rememberCheckbox('reg') : null;
   const status = h('div', { class: 'tauth-status', 'aria-live': 'polite' });
   const submit = h('button', { type: 'submit', class: 'btn btn-primary btn-large', 'data-testid': 'reg-submit' }, 'Registrieren und PDF herunterladen');
 
@@ -298,6 +318,20 @@ function renderRegister(ctx) {
     'form',
     { class: 'tauth-form', novalidate: true, onsubmit: onSubmit },
     h('div', { class: 'form-grid' }, f.firstName.wrap, f.lastName.wrap, f.birthDate.wrap, f.email.wrap),
+    pw
+      ? h(
+          'fieldset',
+          { class: 'tauth-cloud', 'data-testid': 'reg-cloud' },
+          h('legend', {}, 'Cloud-Sicherung'),
+          h(
+            'p',
+            { class: 'muted small tauth-cloud-text' },
+            'Ihr Stand wird automatisch gesichert – mit diesem Passwort schon in Ihrem Browser verschlüsselt. An jedem anderen Gerät melden Sie sich an, geben das Passwort ein und haben alles da. Das Passwort steht nicht in der Registrierungs-PDF: Merken Sie es sich gut.',
+          ),
+          h('div', { class: 'form-grid' }, pw.wraps),
+          remember.wrap,
+        )
+      : null,
     status,
     h('div', { class: 'form-actions tauth-actions' }, submit),
   );
@@ -330,13 +364,15 @@ function renderRegister(ctx) {
       birthDate: readDate(f.birthDate.input),
       email: f.email.input.value.trim(),
     };
+    // Passwort zuerst prüfen: Den Fokus bekommt danach das erste fehlerhafte Feld von oben.
+    const password = pw ? pw.check() : '';
     const ok = applyErrors([
       [f.firstName, nameError(values.firstName, 'Vornamen', 'Vorname')],
       [f.lastName, nameError(values.lastName, 'Nachnamen', 'Nachname')],
       [f.birthDate, birthDateError(f.birthDate.input)],
       [f.email, !values.email ? 'Bitte geben Sie Ihre E-Mail-Adresse ein.' : isValidEmail(values.email) ? '' : 'Bitte geben Sie eine gültige E-Mail-Adresse ein, z. B. name@schule.de.'],
     ]);
-    if (!ok) {
+    if (!ok || password === null) {
       mount(status, alertBox('error', 'Bitte prüfen Sie die rot markierten Felder.'));
       return;
     }
@@ -386,13 +422,65 @@ function renderRegister(ctx) {
       pdf = null;
       pdfError = friendlyError(err);
     }
+
+    // Cloud-Sicherung einrichten (oder eine vorhandene mit dem Passwort holen)
+    let cloud = '';
+    if (pw && password) {
+      mount(submit, h('span', { class: 'spinner', 'aria-hidden': 'true' }), 'Cloud-Sicherung wird eingerichtet …');
+      try {
+        cloud = await cloudAfterRegister(state.teacher, password, { remember: remember.input.checked });
+      } catch (err) {
+        console.warn(err);
+        cloud = 'failed';
+      }
+      state = loadTeacherState(state.teacher.teacherCode) || state;
+    }
     // Seite inzwischen verlassen? Dann nicht mehr in die alte Ansicht zeichnen.
     if (!root.isConnected) return;
-    renderRegisterSuccess(ctx, state, { pdf, pdfError, existed });
+    renderRegisterSuccess(ctx, state, { pdf, pdfError, existed, cloud });
   }
 }
 
-function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed }) {
+/** Hinweis zur Cloud-Sicherung auf der Erfolgsseite der Registrierung. */
+function cloudRegisterNote(ctx, teacher, cloud) {
+  if (!cloud) return null;
+  if (cloud === 'created') {
+    return alertBox('success', h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, 'Cloud-Sicherung eingerichtet. '), 'Ihr Stand wird ab jetzt automatisch gesichert. An einem anderen Gerät melden Sie sich an und geben Ihr Passwort ein.'));
+  }
+  if (cloud === 'restored') {
+    return alertBox('success', h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, 'Ihre Cloud-Sicherung wurde geladen. '), 'Für Sie gab es schon eine Cloud-Sicherung mit diesem Passwort – Ihr Stand ist jetzt auch auf diesem Gerät.'));
+  }
+  if (cloud === 'exists') {
+    return alertBox(
+      'warning',
+      h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, 'Für Sie gibt es bereits eine Cloud-Sicherung mit einem anderen Passwort. '), 'Geben Sie das bisherige Passwort ein, um Ihren Stand auf dieses Gerät zu holen.'),
+      h(
+        'p',
+        {},
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn btn-secondary',
+            'data-testid': 'reg-cloud-unlock',
+            onclick: async (e) => {
+              if (e.detail > 1) return;
+              const result = await openUnlockDialog({ teacher });
+              if (result === 'unlocked' || result === 'reset') ctx.rerender();
+            },
+          },
+          'Passwort eingeben',
+        ),
+      ),
+    );
+  }
+  return alertBox(
+    'info',
+    h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, 'Cloud-Sicherung eingerichtet. '), 'Die Cloud-Sicherung ist gerade nicht erreichbar – Ihr Stand wird hochgeladen, sobald eine Verbindung besteht.'),
+  );
+}
+
+function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed, cloud = '' }) {
   const { root, setTitle, navigate } = ctx;
   const teacher = state.teacher;
   setTitle('Registrierung abgeschlossen');
@@ -475,7 +563,8 @@ function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed }) {
           h('dd', {}, teacher.email),
         ),
       ),
-      existed
+      cloudRegisterNote(ctx, teacher, cloud),
+      existed && cloud !== 'restored'
         ? alertBox('info', h('p', {}, 'Für Sie waren in diesem Browser schon Daten gespeichert. Ihre Angaben wurden aktualisiert – Elternsprechtag, Klassen und Termine bleiben erhalten.'))
         : null,
       h(
@@ -484,7 +573,7 @@ function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed }) {
         h(
           'button',
           { type: 'button', class: 'btn btn-primary btn-large', 'data-testid': 'reg-continue', onclick: onContinue },
-          state.event ? 'Weiter zu Ihren Klassen' : 'Weiter zur Einrichtung des Elternsprechtags',
+          (loadTeacherState(teacher.teacherCode) || state).event ? 'Weiter zu Ihren Klassen' : 'Weiter zur Einrichtung des Elternsprechtags',
         ),
       ),
     ),
@@ -510,19 +599,24 @@ function renderLogin(ctx) {
     onFiles: ([file]) => onUpload(file),
   });
 
+  const progress = (el) => (text) => mount(el, text ? h('p', { class: 'muted tauth-checking' }, h('span', { class: 'spinner tauth-spinner', 'aria-hidden': 'true' }), text) : null);
+  let loggingIn = false;
+
   async function onUpload(file) {
-    if (uploading || !file) return;
+    if (uploading || loggingIn || !file) return;
     uploading = true;
-    mount(uploadStatus, h('p', { class: 'muted tauth-checking' }, h('span', { class: 'spinner tauth-spinner', 'aria-hidden': 'true' }), `„${file.name}“ wird geprüft …`));
+    progress(uploadStatus)(`„${file.name}“ wird geprüft …`);
     try {
       const data = await readRegistrationFile(file);
       if (!root.isConnected) return;
       mount(uploadStatus);
-      completeLogin(ctx, data);
+      loggingIn = true;
+      await completeLogin(ctx, data, { onProgress: progress(uploadStatus) });
     } catch (err) {
       mount(uploadStatus, alertBox('error', h('p', {}, friendlyError(err, NOT_REGISTRATION))));
     } finally {
       uploading = false;
+      loggingIn = false;
     }
   }
 
@@ -546,8 +640,9 @@ function renderLogin(ctx) {
     h('div', { class: 'form-actions tauth-actions' }, h('button', { type: 'submit', class: 'btn btn-primary', 'data-testid': 'login-submit' }, 'Anmelden')),
   );
 
-  function onSubmit(event) {
+  async function onSubmit(event) {
     event.preventDefault();
+    if (loggingIn || uploading) return;
     mount(formStatus);
     const values = {
       firstName: f.firstName.input.value,
@@ -574,10 +669,13 @@ function renderLogin(ctx) {
       f.code.input.focus();
       return;
     }
+    loggingIn = true;
     try {
-      completeLogin(ctx, { firstName: values.firstName, lastName: values.lastName, birthDate: values.birthDate, email: '' }, { typed: true });
+      await completeLogin(ctx, { firstName: values.firstName, lastName: values.lastName, birthDate: values.birthDate, email: '' }, { typed: true, onProgress: progress(formStatus) });
     } catch (err) {
       mount(formStatus, alertBox('error', h('p', {}, 'Die Anmeldung hat nicht geklappt. ', friendlyError(err))));
+    } finally {
+      loggingIn = false;
     }
   }
 
@@ -665,10 +763,12 @@ async function isBackupFile(file) {
 }
 
 /**
- * Meldet die Lehrkraft an. Legt einen leeren Zustand an, wenn auf diesem Gerät noch keiner existiert.
- * @param {{typed?: boolean}} [opts] – typed: Namen wurden von Hand eingegeben (nicht aus der PDF gelesen)
+ * Meldet die Lehrkraft an. Legt einen leeren Zustand an, wenn auf diesem Gerät noch keiner existiert, und holt
+ * mit dem Passwort den Stand aus der Cloud-Sicherung (bzw. bietet an, sie einzurichten).
+ * @param {{typed?: boolean, onProgress?: (text: string) => void}} [opts] – typed: Namen wurden von Hand eingegeben
+ *   (nicht aus der PDF gelesen); onProgress: Hinweis, solange die Cloud-Sicherung geprüft wird
  */
-function completeLogin(ctx, { firstName, lastName, birthDate, email }, { typed = false } = {}) {
+async function completeLogin(ctx, { firstName, lastName, birthDate, email }, { typed = false, onProgress } = {}) {
   // Von Hand eingegebene Namen werden nur für einen neuen Zustand gespeichert – dann ohne reine Kleinschreibung.
   const first = typed ? tidyName(firstName) : cleanName(firstName);
   const last = typed ? tidyName(lastName) : cleanName(lastName);
@@ -687,8 +787,18 @@ function completeLogin(ctx, { firstName, lastName, birthDate, email }, { typed =
       s.teacher.email = email;
     });
   }
+  let restored = false;
+  if (cloudEnabled()) {
+    try {
+      ({ restored } = await cloudAfterLogin(state.teacher, { onProgress }));
+    } catch (err) {
+      console.warn(err);
+    }
+    onProgress?.('');
+    state = loadTeacherState(code) || state;
+  }
   toast(`Willkommen, ${fullName(state.teacher)}!`, 'success');
-  // Neues Gerät: „Elternsprechtag erstellen“ zeigt einen dauerhaften Hinweis mit „Zwischenstand laden“.
-  markEmptyDevice(code, created);
+  // Neues Gerät ohne Stand aus der Cloud: „Elternsprechtag erstellen“ zeigt einen Hinweis mit „Zwischenstand laden“.
+  markEmptyDevice(code, created && !restored && isEmptyTeacherState(state));
   ctx.navigate(afterLoginPath(state));
 }

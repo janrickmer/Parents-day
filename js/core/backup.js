@@ -31,8 +31,8 @@ export function downloadBackup(state, { eventDraft = null } = {}) {
   return name;
 }
 
-/** Entwurf aus der Datei prüfen: nur einfache Werte, begrenzte Länge. */
-function cleanDraft(raw) {
+/** Entwurf (aus Datei oder Cloud-Sicherung) prüfen: nur einfache Werte, begrenzte Länge. */
+export function cleanDraft(raw) {
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.days)) return null;
   const str = (v, max) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, max) : '');
   return {

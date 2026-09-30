@@ -1,0 +1,183 @@
+/* Cloud-Sicherung (js/components/cloud-ui.js): Passwortfelder, Dialoge, Anzeige in der Kopfzeile */
+
+.cloud-pw {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.cloud-pw .cloud-pw-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cloud-pw-toggle {
+  flex: 0 0 auto;
+  min-width: 92px;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.checkbox-label input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--c-primary);
+}
+.cloud-remember .field-hint {
+  margin: 2px 0 0 26px;
+}
+.cloud-remember .field-error {
+  margin: 4px 0 0 26px;
+}
+
+/* Knopf, der wie ein Link aussieht */
+.link-button {
+  font: inherit;
+  color: var(--c-primary);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-button:hover {
+  color: var(--c-primary-dark);
+}
+.link-button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+  border-radius: 2px;
+}
+
+.cloud-form .field {
+  margin: 0;
+}
+.cloud-dialog-status:empty {
+  display: none;
+}
+.cloud-dialog-status {
+  margin-top: 12px;
+}
+.cloud-dialog-status .alert p {
+  margin: 0;
+}
+.cloud-actions {
+  flex-wrap: wrap;
+}
+
+/* Konflikt: zwei Stände nebeneinander */
+.cloud-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+.cloud-choice {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--c-surface-2);
+}
+.cloud-choice-recommended {
+  border-color: var(--c-success);
+  background: var(--c-success-soft);
+}
+.cloud-choice > * {
+  margin: 0;
+}
+.cloud-choice-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  margin-bottom: 4px;
+}
+.cloud-choice-time {
+  font-weight: 600;
+}
+.cloud-choice-summary {
+  margin-top: 4px;
+}
+
+/* Kopfzeile: gespeichert + Cloud-Sicherung */
+.header-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+  padding-bottom: 6px;
+}
+.header-status .save-indicator {
+  padding: 0;
+}
+.cloud-indicator {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  font-size: 0.78rem;
+  color: var(--c-muted);
+}
+.cloud-indicator[hidden] {
+  display: none;
+}
+.cloud-indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-border-strong);
+  flex: 0 0 auto;
+}
+.cloud-indicator-success {
+  color: var(--c-success-text);
+}
+.cloud-indicator-success .cloud-indicator-dot {
+  background: var(--c-success);
+}
+.cloud-indicator-warning {
+  color: var(--c-warning);
+  font-weight: 600;
+}
+.cloud-indicator-warning .cloud-indicator-dot {
+  background: var(--c-warning);
+}
+.cloud-indicator-action {
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.cloud-logout-option {
+  margin-top: 4px;
+}
+
+@media (max-width: 520px) {
+  .cloud-actions .btn {
+    width: 100%;
+  }
+}
+
+/* Registrierung: Abschnitt „Cloud-Sicherung“ */
+.tauth-cloud {
+  margin: 18px 0 0;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--c-border);
+  border-left: 5px solid var(--c-primary);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  min-width: 0;
+}
+.tauth-cloud legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
+.tauth-cloud-text {
+  margin: 0 0 12px;
+  max-width: 72ch;
+}
+.tauth-cloud .form-grid {
+  margin-bottom: 12px;
+}

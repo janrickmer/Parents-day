@@ -167,9 +167,9 @@ test('Gesamtablauf mit digitalem Briefkasten: Absenden per Briefkasten, Notlösu
     const connectSrc = /connect-src ([^;]*)/.exec(csp)?.[1].trim().split(/\s+/);
     assert.deepEqual(connectSrc, ["'self'", mailboxOrigin], 'Verbindungen nur zur eigenen Seite und zum Briefkasten');
     await page.click(tid('start-teacher'));
-    // Mit Briefkasten stimmt „ParentsDay hat keinen Server“ nicht mehr
+    // Mit Briefkasten und Cloud-Sicherung stimmt „ParentsDay hat keinen Server“ nicht mehr
     const note = flat(await page.textContent('.tauth-page .alert-info'));
-    assert.match(note, /Beim digitalen Briefkasten liegen nur die Rückmeldungen der Eltern und die Angaben aus Ihren Elternbriefen – verschlüsselt\./);
+    assert.match(note, /Ihre Daten werden in diesem Browser gespeichert und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung\./);
     assert.doesNotMatch(note, /keinen Server/);
     await page.click(tid('auth-choose-register'));
     assert.match(await page.textContent('.tauth-form'), /als Notlösung, falls der digitale Briefkasten nicht erreichbar ist/);
@@ -177,14 +177,20 @@ test('Gesamtablauf mit digitalem Briefkasten: Absenden per Briefkasten, Notlösu
     await page.fill(tid('reg-lastname'), 'Meier');
     await page.fill(tid('reg-birthdate'), '1990-03-15');
     await page.fill(tid('reg-email'), TEACHER_EMAIL);
+    await page.fill(tid('reg-password'), 'Sonne Tafel Kreide 7');
+    await page.fill(tid('reg-password2'), 'Sonne Tafel Kreide 7');
     const reg = await captureDownload(page, () => page.click(tid('reg-submit')));
     assert.equal(reg.filename, 'ParentsDay Registrierung Anna Meier.pdf');
     assert.equal(pdfPayload(reg.buffer).teacherCode, T_CODE);
     assert.equal(pdfPageCount(reg.buffer), 1);
     const regText = flat(pdfPages(reg.file)[0].text);
-    assert.match(regText, /Speichern Sie einen Zwischenstand auch gleich nach Ihren ersten Elternbriefen/);
+    assert.match(regText, /Ihr Passwort steht aus Sicherheitsgründen nicht in diesem Dokument/);
     assert.doesNotMatch(regText, /nicht auf einem Server/);
+    assert.doesNotMatch(regText, /Sonne Tafel Kreide/, 'Passwort nicht in der PDF');
+    assert.ok(!reg.buffer.toString('latin1').includes('Sonne Tafel'), 'Passwort auch nicht in den eingebetteten Daten');
     await renderPdf(reg.file, 'pdf-registrierung', [0]);
+    await page.waitForSelector(tid('reg-cloud-note'));
+    assert.match(flat(await page.textContent(tid('reg-cloud-note'))), /Cloud-Sicherung eingerichtet\./);
     await page.click(tid('reg-continue'));
     await waitForHash(page, '#/lehrkraft/elternsprechtag');
 
@@ -230,7 +236,9 @@ test('Gesamtablauf mit digitalem Briefkasten: Absenden per Briefkasten, Notlösu
     const letters = await captureDownload(page, () => page.click(tid('primary-action')));
     assert.equal(letters.filename, 'ParentsDay Elternbriefe Klasse 5a.pdf');
     assert.equal(pdfPageCount(letters.buffer), 3);
-    await page.locator(tid('letters-mailbox-note'), { hasText: 'Tipp: Speichern Sie jetzt einen Zwischenstand.' }).waitFor();
+    await page.locator(tid('letters-mailbox-note'), { hasText: 'über den digitalen Briefkasten' }).waitFor();
+    // Mit Cloud-Sicherung liegt der Schlüssel des Briefkastens auch dort – kein Hinweis auf den Zwischenstand
+    assert.doesNotMatch(await page.textContent(tid('letters-mailbox-note')), /Zwischenstand/);
     let state = await readState(page);
     const mailbox = state.mailbox;
     assert.match(mailbox?.id || '', /^[A-Za-z0-9_-]{32}$/, 'Briefkasten angelegt');

@@ -61,7 +61,7 @@ export default function render({ root, setTitle }) {
       'p',
       { class: 'muted small start-privacy', 'data-testid': 'start-privacy' },
       withMailbox
-        ? 'ParentsDay speichert Ihre Daten in Ihrem Browser. Die Rückmeldungen der Eltern gehen Ende-zu-Ende-verschlüsselt über den digitalen Briefkasten – lesen kann sie nur die Lehrkraft. '
+        ? 'ParentsDay speichert Ihre Daten in Ihrem Browser und – für Lehrkräfte mit ihrem Passwort verschlüsselt – in der Cloud-Sicherung. Die Rückmeldungen der Eltern gehen Ende-zu-Ende-verschlüsselt über den digitalen Briefkasten – lesen kann sie nur die Lehrkraft. '
         : 'ParentsDay speichert keine Daten auf einem Server. Alles bleibt in Ihrem Browser und in den Dateien, die Sie selbst herunterladen. ',
       h('a', { href: '#/datenschutz' }, 'Mehr zum Datenschutz'),
     ),

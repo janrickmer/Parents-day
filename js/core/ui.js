@@ -105,10 +105,11 @@ function isRepeatClick(e) {
 
 /**
  * Modaler Dialog. Der Tastaturfokus bleibt im Dialog; Esc schließt nur den obersten Dialog.
- * @param {{title:string, content: Node|string|Array, actions?: Array<{label:string, variant?:string, onClick?:(close:Function)=>void, value?:any}>, onClose?:Function, wide?:boolean}} opts
+ * @param {{title:string, content: Node|string|Array, actions?: Array<{label:string, variant?:string, onClick?:(close:Function)=>void, value?:any, testId?:string}>, onClose?:Function, wide?:boolean, dismissible?:boolean}} opts
+ *   dismissible: false – Esc und ein Klick daneben schließen den Dialog nicht (eine Entscheidung ist nötig)
  * @returns {{close: (value?:any)=>void, result: Promise<any>, element: HTMLElement}}
  */
-export function modal({ title, content, actions = [], onClose, wide = false }) {
+export function modal({ title, content, actions = [], onClose, wide = false, dismissible = true }) {
   let resolve;
   const result = new Promise((r) => (resolve = r));
   const previouslyFocused = document.activeElement;
@@ -129,7 +130,7 @@ export function modal({ title, content, actions = [], onClose, wide = false }) {
   const onKey = (e) => {
     if (openDialogs[openDialogs.length - 1] !== entry) return;
     if (e.key === 'Escape') {
-      close(undefined);
+      if (dismissible) close(undefined);
       return;
     }
     if (e.key !== 'Tab') return;
@@ -166,6 +167,7 @@ export function modal({ title, content, actions = [], onClose, wide = false }) {
               {
                 type: 'button',
                 class: `btn btn-${a.variant || 'secondary'}`,
+                'data-testid': a.testId || null,
                 onclick: (e) => {
                   if (isRepeatClick(e)) return;
                   if (a.onClick) a.onClick(close);
@@ -178,7 +180,7 @@ export function modal({ title, content, actions = [], onClose, wide = false }) {
         )
       : null,
   );
-  const backdrop = h('div', { class: 'modal-backdrop', onclick: (e) => e.target === backdrop && !isRepeatClick(e) && close(undefined) }, dialog);
+  const backdrop = h('div', { class: 'modal-backdrop', onclick: (e) => dismissible && e.target === backdrop && !isRepeatClick(e) && close(undefined) }, dialog);
   entry.backdrop = backdrop;
   document.body.appendChild(backdrop);
   openDialogs.push(entry);

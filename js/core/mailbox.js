@@ -123,23 +123,39 @@ export async function decryptForTeacher(privateJwk, msg) {
 
 /** Fehler mit verständlicher Meldung; `offline` = Dienst nicht erreichbar. */
 export class MailboxError extends Error {
-  constructor(message, { status = 0, offline = false } = {}) {
+  constructor(message, { status = 0, offline = false, data = null } = {}) {
     super(message);
     this.name = 'MailboxError';
     this.status = status;
     this.offline = offline;
+    /** Antwort des Dienstes (z. B. { version } bei 409), sonst null */
+    this.data = data;
   }
 }
 
 const UNREACHABLE = 'Der digitale Briefkasten ist gerade nicht erreichbar. Bitte prüfen Sie die Internetverbindung.';
 
-async function request(method, path, { body, secret } = {}) {
+const MAILBOX_MESSAGES = {
+  403: 'Der Zugang zum Briefkasten wurde abgelehnt.',
+  404: 'Nicht gefunden.',
+  409: 'Dieser Eintrag gehört zu einem anderen Briefkasten.',
+  429: 'Gerade kommen sehr viele Rückmeldungen an. Bitte versuchen Sie es in einer Minute noch einmal.',
+  507: 'Der Briefkasten der Lehrkraft ist voll.',
+};
+
+/**
+ * Anfrage an den Dienst (Briefkasten und Cloud-Sicherung). Wirft MailboxError mit verständlicher Meldung.
+ * @param {{body?: object, secret?: string, messages?: object, unreachable?: string, timeout?: number, keepalive?: boolean}} [opts]
+ *   messages: Meldungen je HTTP-Status, unreachable: Meldung ohne Verbindung,
+ *   keepalive: Anfrage darf das Schließen der Seite überdauern (nur für kleine Anfragen bis 64 KB)
+ */
+export async function serviceRequest(method, path, { body, secret, messages = MAILBOX_MESSAGES, unreachable = UNREACHABLE, timeout = TIMEOUT_MS, keepalive = false } = {}) {
   if (!MAILBOX_URL) throw new MailboxError('Der digitale Briefkasten ist nicht eingerichtet.', { offline: true });
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (secret) headers.Authorization = `Bearer ${secret}`;
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), TIMEOUT_MS) : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeout) : null;
   let res;
   try {
     res = await fetch(`${MAILBOX_URL.replace(/\/+$/, '')}${path}`, {
@@ -149,9 +165,10 @@ async function request(method, path, { body, secret } = {}) {
       signal: ctrl?.signal,
       cache: 'no-store',
       credentials: 'omit',
+      ...(keepalive ? { keepalive: true } : {}),
     });
   } catch {
-    throw new MailboxError(UNREACHABLE, { offline: true });
+    throw new MailboxError(unreachable, { offline: true });
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -162,19 +179,17 @@ async function request(method, path, { body, secret } = {}) {
     data = null;
   }
   if (!res.ok) {
-    const messages = {
-      403: 'Der Zugang zum Briefkasten wurde abgelehnt.',
-      404: 'Nicht gefunden.',
-      409: 'Dieser Eintrag gehört zu einem anderen Briefkasten.',
-      429: 'Gerade kommen sehr viele Rückmeldungen an. Bitte versuchen Sie es in einer Minute noch einmal.',
-      507: 'Der Briefkasten der Lehrkraft ist voll.',
-    };
-    throw new MailboxError(messages[res.status] || 'Der digitale Briefkasten hat einen Fehler gemeldet. Bitte versuchen Sie es später noch einmal.', {
+    throw new MailboxError(messages[res.status] || messages.default || 'Der digitale Briefkasten hat einen Fehler gemeldet. Bitte versuchen Sie es später noch einmal.', {
       status: res.status,
       offline: res.status >= 500 && res.status !== 507,
+      data,
     });
   }
   return data;
+}
+
+function request(method, path, opts) {
+  return serviceRequest(method, path, opts);
 }
 
 /** Prüft, ob der Dienst erreichbar ist. */

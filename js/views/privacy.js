@@ -1,6 +1,6 @@
 // Datenschutz-Hinweise: beschreibt, wie ParentsDay mit Daten umgeht.
-// Ist ein digitaler Briefkasten eingerichtet (MAILBOX_URL), kommt ein eigener Abschnitt dazu, und die
-// Sätze „kein Server“ bzw. „nur per PDF-Datei“ werden entsprechend angepasst.
+// Ist ein Dienst eingerichtet (MAILBOX_URL), kommen Abschnitte zur Cloud-Sicherung und zum digitalen Briefkasten
+// dazu, und die Sätze „kein Server“ bzw. „nur per PDF-Datei“ werden entsprechend angepasst.
 
 import { h, mount } from '../core/ui.js';
 import { mailboxEnabled } from '../core/mailbox.js';
@@ -18,7 +18,7 @@ export default function render({ root, setTitle }) {
         ? h(
             'p',
             {},
-            'ParentsDay ist eine Browser-Anwendung. Namen, Codes und Termine werden im Browser gespeichert. Für den digitalen Briefkasten gibt es einen kleinen Dienst, der die Rückmeldungen der Eltern nur verschlüsselt entgegennimmt und an die Lehrkraft weitergibt. Den Schlüssel dazu hat er nicht (siehe unten).',
+            'ParentsDay ist eine Browser-Anwendung. Namen, Codes und Termine werden im Browser gespeichert. Dazu gibt es einen kleinen Dienst, der die Rückmeldungen der Eltern und die Cloud-Sicherung der Lehrkräfte nur verschlüsselt aufbewahrt. Die Schlüssel dazu hat er nicht (siehe unten).',
           )
         : h('p', {}, 'ParentsDay ist eine reine Browser-Anwendung. Es gibt keinen Server, der Namen, Codes oder Termine speichert oder auswertet.'),
       h('h2', {}, 'Lehrkräfte'),
@@ -26,13 +26,15 @@ export default function render({ root, setTitle }) {
         'ul',
         {},
         withMailbox
-          ? h('li', {}, 'Registrierungsdaten, Klassen, Namen der Lernenden, Rückmeldungen und Termine werden im Speicher dieses Browsers (localStorage) abgelegt. Beim digitalen Briefkasten liegen Rückmeldungen und Angaben aus dem Elternbrief nur verschlüsselt (siehe unten).')
+          ? h('li', {}, 'Registrierungsdaten, Klassen, Namen der Lernenden, Rückmeldungen und Termine werden im Speicher dieses Browsers (localStorage) abgelegt – und, mit Ihrem Passwort verschlüsselt, in Ihrer Cloud-Sicherung (siehe unten). Beim digitalen Briefkasten liegen Rückmeldungen und Angaben aus dem Elternbrief nur verschlüsselt.')
           : h('li', {}, 'Registrierungsdaten, Klassen, Namen der Lernenden, Rückmeldungen und Termine werden nur im Speicher dieses Browsers (localStorage) abgelegt.'),
         h('li', {}, 'Mit „Zwischenstand speichern“ erhalten Sie eine Datei mit allen Daten. Bewahren Sie sie sicher auf – sie enthält personenbezogene Daten.'),
         withMailbox
-          ? h('li', {}, 'Der Schlüssel zu Ihrem digitalen Briefkasten liegt nur in diesem Browser und in Ihrem Zwischenspeicher. Ohne ihn lassen sich die Rückmeldungen im Briefkasten nicht lesen.')
+          ? h('li', {}, 'Der Schlüssel zu Ihrem digitalen Briefkasten liegt in diesem Browser, in Ihrer Cloud-Sicherung und in Ihrem Zwischenspeicher. Ohne ihn lassen sich die Rückmeldungen im Briefkasten nicht lesen.')
           : null,
-        h('li', {}, 'Auf gemeinsam genutzten Geräten sollten Sie sich nach der Arbeit abmelden und die Browserdaten löschen.'),
+        withMailbox
+          ? h('li', {}, 'Auf gemeinsam genutzten Geräten wählen Sie beim Abmelden „Meine Daten von diesem Gerät entfernen“ und lassen das Passwort nicht merken.')
+          : h('li', {}, 'Auf gemeinsam genutzten Geräten sollten Sie sich nach der Arbeit abmelden und die Browserdaten löschen.'),
       ),
       h('h2', {}, 'Eltern'),
       h(
@@ -47,16 +49,35 @@ export default function render({ root, setTitle }) {
             ]
           : h('li', {}, 'Die Rückmeldung an die Lehrkraft erfolgt ausschließlich über die PDF-Datei, die Sie selbst per E-Mail versenden.'),
       ),
+      withMailbox ? cloudSection() : null,
       withMailbox ? mailboxSection() : null,
       h('h2', {}, 'Technik'),
       h(
         'p',
         {},
         'Alle Programmbibliotheken und Schriften werden direkt von dieser Seite geladen, nicht von fremden Servern. ',
-        withMailbox ? 'Verbindungen zu einem anderen Dienst gibt es nur zum digitalen Briefkasten. ' : null,
+        withMailbox ? 'Verbindungen zu einem anderen Dienst gibt es nur zum Dienst für den digitalen Briefkasten und die Cloud-Sicherung. ' : null,
         'Es werden keine Cookies und keine Analyse-Werkzeuge verwendet.',
       ),
       h('p', {}, h('a', { href: '#/' }, 'Zur Startseite')),
+    ),
+  );
+}
+
+/** Abschnitt „Cloud-Sicherung der Lehrkräfte“ (nur mit Dienst). */
+function cloudSection() {
+  return h(
+    'section',
+    { class: 'stack-small', 'aria-labelledby': 'privacy-cloud-title', 'data-testid': 'privacy-cloud' },
+    h('h2', { id: 'privacy-cloud-title' }, 'Cloud-Sicherung der Lehrkräfte'),
+    h(
+      'ul',
+      {},
+      h('li', {}, 'Der komplette Stand der Lehrkraft (Elternsprechtag, Klassen, Namen der Lernenden, Rückmeldungen, Termine, Schlüssel des Briefkastens) wird im Browser mit ihrem Passwort verschlüsselt (AES-256-GCM, Schlüssel aus dem Passwort mit PBKDF2) und so beim Dienst bei Cloudflare abgelegt.'),
+      h('li', {}, 'Das Passwort verlässt den Browser nie. Der Dienst und Cloudflare können die Sicherung nicht lesen. Ohne das Passwort lässt sie sich nicht entschlüsseln – auch nicht von ParentsDay.'),
+      h('li', {}, 'Zur Zuordnung dient eine Kennung, die aus Namen und Geburtsdatum der Lehrkraft berechnet wird (ein Hashwert, nicht die Angaben selbst). Nach 10 falschen Passwörtern innerhalb einer Stunde wird der Zugang für den Rest der Stunde gesperrt.'),
+      h('li', {}, 'Die Lehrkraft kann die Cloud-Sicherung jederzeit unter „Weitere Einstellungen“ löschen. Wird sie 400 Tage weder geändert noch abgerufen, wird sie automatisch gelöscht.'),
+      h('li', {}, 'Ist das Passwort auf einem Gerät gemerkt, liegt der daraus berechnete Schlüssel im Speicher dieses Browsers – wie der Stand selbst auch.'),
     ),
   );
 }

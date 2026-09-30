@@ -13,15 +13,21 @@ class Statement {
   bind(...params) {
     return new Statement(this.db, this.sql, params);
   }
+  allSync() {
+    return { success: true, results: this.db.prepare(this.sql).all(...this.params), meta: { changes: 0 } };
+  }
+  runSync() {
+    const info = this.db.prepare(this.sql).run(...this.params);
+    return { success: true, results: [], meta: { changes: Number(info.changes) } };
+  }
   async first() {
     return this.db.prepare(this.sql).get(...this.params) ?? null;
   }
   async all() {
-    return { success: true, results: this.db.prepare(this.sql).all(...this.params) };
+    return this.allSync();
   }
   async run() {
-    const info = this.db.prepare(this.sql).run(...this.params);
-    return { success: true, meta: { changes: Number(info.changes) } };
+    return this.runSync();
   }
 }
 
@@ -33,9 +39,18 @@ export class FakeD1 {
   prepare(sql) {
     return new Statement(this.db, sql);
   }
+  /** Wie bei D1: alle Anweisungen in einer Transaktion; SELECT liefert `results`. */
   async batch(statements) {
     const results = [];
-    for (const st of statements) results.push(await st.run());
+    this.db.exec('BEGIN');
+    try {
+      // synchron – so kann keine andere Anfrage mitten in die Transaktion geraten
+      for (const st of statements) results.push(/^\s*select/i.test(st.sql) ? st.allSync() : st.runSync());
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
     return results;
   }
 }
@@ -47,7 +62,7 @@ const SKIP_HEADERS = new Set(['connection', 'keep-alive', 'transfer-encoding', '
  * @returns {Promise<{url:string, db:FakeD1, env:object, close:()=>Promise<void>}>}
  */
 export async function startMailboxServer({ allowedOrigins = [], postsPerMinute = 1000 } = {}) {
-  const env = { DB: new FakeD1(), ALLOWED_ORIGINS: allowedOrigins.join(','), POSTS_PER_MINUTE: String(postsPerMinute) };
+  const env = { DB: new FakeD1(), ALLOWED_ORIGINS: allowedOrigins.join(','), POSTS_PER_MINUTE: String(postsPerMinute), SYNC_WRITES_PER_MINUTE: '10000' };
   const server = http.createServer(async (req, res) => {
     try {
       const chunks = [];

@@ -2,10 +2,13 @@
 // Seitenrahmen für Öffentlichkeit, Lehrkräfte und Eltern.
 
 import { APP_NAME } from './config.js';
-import { h, mount, alertBox, confirmDialog, isNetworkError } from './core/ui.js';
-import { getSession, getCurrentState, clearSession, onStateChange, isDraftPending, onDraftPendingChange, isPersistentStorage, setReturnTo } from './core/storage.js';
+import { h, mount, alertBox, confirmDialog, isNetworkError, toast } from './core/ui.js';
+import { getSession, getCurrentState, clearSession, onStateChange, isDraftPending, onDraftPendingChange, isPersistentStorage, setReturnTo, deleteTeacherState } from './core/storage.js';
 import { saveBackupNow, openLoadBackupDialog } from './components/backup-actions.js';
 import { formatTimestamp } from './core/time.js';
+import { cloudEnabled } from './core/cloud.js';
+import { startCloudSync, stopCloudSync, flushCloudSync, getCloudStatus, endCloudSession, forgetCloudOnDevice } from './core/cloud-sync.js';
+import { cloudIndicator, installCloudUi } from './components/cloud-ui.js';
 
 /**
  * Routen. Jede View ist ein ES-Modul mit
@@ -109,6 +112,8 @@ function teacherHeader(state) {
     updateSaved();
   });
   const unsubscribeDraft = onDraftPendingChange(updateSaved);
+  const cloud = cloudIndicator(t);
+  const withCloud = cloudEnabled();
   const header = h(
     'header',
     { class: 'site-header teacher-header' },
@@ -136,7 +141,9 @@ function teacherHeader(state) {
               class: 'btn btn-small btn-secondary',
               onclick: saveBackupNow,
               'data-action': 'backup-save',
-              title: 'Alles wird automatisch in diesem Browser gespeichert. Die Datei brauchen Sie für ein anderes Gerät oder falls die Browserdaten gelöscht werden.',
+              title: withCloud
+                ? 'Alles wird automatisch in diesem Browser und in Ihrer Cloud-Sicherung gespeichert. Die Datei ist eine zusätzliche Sicherung zum Aufbewahren.'
+                : 'Alles wird automatisch in diesem Browser gespeichert. Die Datei brauchen Sie für ein anderes Gerät oder falls die Browserdaten gelöscht werden.',
             },
             'Zwischenstand speichern',
           ),
@@ -147,7 +154,7 @@ function teacherHeader(state) {
               class: 'btn btn-small btn-secondary',
               onclick: () => openLoadBackupDialog({ navigate }),
               'data-action': 'backup-load',
-              title: 'Einen gespeicherten Zwischenstand öffnen, z. B. auf einem anderen Gerät',
+              title: withCloud ? 'Einen gespeicherten Zwischenstand aus einer Datei öffnen' : 'Einen gespeicherten Zwischenstand öffnen, z. B. auf einem anderen Gerät',
             },
             'Zwischenstand laden',
           ),
@@ -155,11 +162,12 @@ function teacherHeader(state) {
         ),
       ),
     ),
-    h('div', { class: 'container' }, savedInfo),
+    h('div', { class: 'container header-status' }, savedInfo, cloud.element),
   );
   header._cleanup = () => {
     unsubscribe();
     unsubscribeDraft();
+    cloud.cleanup();
   };
   return header;
 }
@@ -172,14 +180,60 @@ function footer() {
   );
 }
 
+/** Ist die Cloud-Sicherung auf diesem Gerät verbunden (Passwort bekannt)? */
+function cloudConnected(status) {
+  return !['disabled', 'off', 'not-setup', 'needs-password'].includes(status.kind);
+}
+
 async function onLogout() {
+  const code = getSession();
+  const status = getCloudStatus(code);
+  const connected = cloudConnected(status);
+  const removeBox = h('input', { type: 'checkbox', id: 'logout-remove', 'data-testid': 'logout-remove' });
   const ok = await confirmDialog({
     title: 'Abmelden?',
-    message: 'Ihre Daten bleiben in diesem Browser gespeichert. Tipp: Speichern Sie vorher einen Zwischenstand, wenn Sie an einem anderen Gerät weiterarbeiten möchten.',
+    message: connected
+      ? h(
+          'div',
+          { class: 'stack-small' },
+          h('p', {}, 'Ihr Stand ist in Ihrer Cloud-Sicherung. An jedem Gerät melden Sie sich einfach an und geben Ihr Passwort ein.'),
+          h(
+            'div',
+            { class: 'cloud-remember cloud-logout-option' },
+            h('label', { class: 'checkbox-label', for: removeBox.id }, removeBox, ' Meine Daten von diesem Gerät entfernen'),
+            h('div', { class: 'field-hint' }, 'Empfohlen an fremden oder gemeinsam genutzten Computern. Ihre Cloud-Sicherung bleibt erhalten.'),
+          ),
+        )
+      : 'Ihre Daten bleiben in diesem Browser gespeichert. Tipp: Speichern Sie vorher einen Zwischenstand, wenn Sie an einem anderen Gerät weiterarbeiten möchten.',
     confirmText: 'Abmelden',
   });
   if (!ok) return;
+  let remove = connected && removeBox.checked;
+  if (connected) {
+    // Noch nicht hochgeladene Änderungen zuerst sichern.
+    const flushed = await flushCloudSync();
+    if (!flushed) {
+      const proceed = await confirmDialog({
+        title: 'Noch nicht in der Cloud gesichert',
+        message: remove
+          ? 'Ihre letzten Änderungen konnten nicht in die Cloud-Sicherung hochgeladen werden (keine Verbindung). Deshalb bleiben Ihre Daten auf diesem Gerät. Beim nächsten Anmelden hier werden sie gesichert.'
+          : 'Ihre letzten Änderungen konnten nicht in die Cloud-Sicherung hochgeladen werden (keine Verbindung). Sie bleiben in diesem Browser gespeichert und werden beim nächsten Anmelden hier gesichert.',
+        confirmText: 'Trotzdem abmelden',
+      });
+      if (!proceed) return;
+      remove = false;
+    }
+  }
+  stopCloudSync();
+  if (code) {
+    endCloudSession(code);
+    if (remove) {
+      deleteTeacherState(code);
+      forgetCloudOnDevice(code);
+    }
+  }
   clearSession();
+  if (remove) toast('Ihre Daten wurden von diesem Gerät entfernt. Ihre Cloud-Sicherung bleibt erhalten.', 'success', 6000);
   navigate('/');
 }
 
@@ -297,6 +351,8 @@ async function render() {
       navigate('/lehrkraft/anmelden', { replace: true });
       return;
     }
+    // Cloud-Sicherung abgleichen, solange die Lehrkraft angemeldet ist (auch nach dem Neuladen der Seite).
+    startCloudSync(state.teacher.teacherCode);
   }
   const notFoundState = route ? null : getSession() ? getCurrentState() : null;
   const layout = route ? route.layout : notFoundState ? 'teacher' : 'public';
@@ -346,5 +402,6 @@ async function render() {
   }
 }
 
+installCloudUi({ rerender: render });
 window.addEventListener('hashchange', render);
 render();

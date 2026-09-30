@@ -1,6 +1,6 @@
-// Speicherung im Browser (localStorage). ParentsDay hat keinen eigenen Server: alle Daten der Lehrkraft
-// liegen nur in diesem Browser und in heruntergeladenen Zwischenspeicher-Dateien. (Der optionale digitale
-// Briefkasten hält nur verschlüsselte Rückmeldungen und Elternbrief-Angaben, siehe core/mailbox.js.)
+// Speicherung im Browser (localStorage). Alle Daten der Lehrkraft liegen in diesem Browser und in
+// heruntergeladenen Zwischenspeicher-Dateien. Mit Briefkasten-Dienst liegen dort außerdem – verschlüsselt –
+// die Rückmeldungen und Elternbrief-Angaben (core/mailbox.js) sowie die Cloud-Sicherung (core/cloud.js).
 //
 // Datenmodell der Lehrkraft (TeacherState, Version 1):
 // {
@@ -141,9 +141,11 @@ export function loadTeacherState(teacherCode) {
  * Speichert den Zustand, aktualisiert savedAt und informiert alle Beobachter.
  * Wirft einen Fehler (STORAGE_FULL), wenn der Browser nicht speichern kann – die Beobachter
  * („Automatisch gespeichert“) werden dann nicht benachrichtigt.
+ * @param {{keepSavedAt?: boolean}} [opts] – keepSavedAt: Zeitpunkt der letzten Änderung behalten
+ *   (Stand aus der Cloud-Sicherung, der auf einem anderen Gerät geändert wurde)
  */
-export function saveTeacherState(state) {
-  state.savedAt = new Date().toISOString();
+export function saveTeacherState(state, { keepSavedAt = false } = {}) {
+  if (!keepSavedAt || Number.isNaN(Date.parse(state.savedAt))) state.savedAt = new Date().toISOString();
   sortClasses(state);
   storageSet(localStorage, TEACHER_PREFIX + state.teacher.teacherCode, JSON.stringify(state));
   for (const fn of listeners) {
@@ -254,9 +256,17 @@ export function updateState(mutator) {
   return saveTeacherState(state);
 }
 
-/** Ersetzt den gesamten Zustand (z. B. nach dem Laden eines Zwischenspeichers). */
-export function replaceState(state) {
-  return saveTeacherState(normalizeTeacherState(state));
+/**
+ * Ersetzt den gesamten Zustand (z. B. nach dem Laden eines Zwischenspeichers).
+ * @param {{keepSavedAt?: boolean}} [opts] – siehe saveTeacherState
+ */
+export function replaceState(state, opts) {
+  return saveTeacherState(normalizeTeacherState(state), opts);
+}
+
+/** Hat die Lehrkraft noch nichts eingerichtet (kein Elternsprechtag, keine Klassen)? */
+export function isEmptyTeacherState(state) {
+  return !state || (!state.event && !(state.classes || []).length && !state.mailbox);
 }
 
 /** Findet eine Klasse im Zustand. */
