@@ -55,6 +55,8 @@ npm test             # Unit-Tests der Kernlogik
 npm run test:e2e     # Browser-Tests (Chromium)
 ```
 
+Bei jedem Push laufen beide Testarten automatisch auf GitHub, zu sehen im Reiter *Actions* (`.github/workflows/tests.yml`).
+
 Weitere Unterlagen:
 
 * [`docs/ARCHITEKTUR.md`](docs/ARCHITEKTUR.md): Aufbau, Datenmodell und Datenfluss

@@ -1,0 +1,29 @@
+name: Tests
+
+# Prüft bei jedem Push und Pull Request die Kernlogik (Unit-Tests) und alle Abläufe im Browser.
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Abhängigkeiten installieren
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          pip install pymupdf
+      - name: Unit-Tests
+        run: npm test
+      - name: Browser-Tests
+        run: npm run test:e2e
