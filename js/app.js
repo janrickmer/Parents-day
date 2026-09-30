@@ -2,9 +2,9 @@
 // Seitenrahmen für Öffentlichkeit, Lehrkräfte und Eltern.
 
 import { APP_NAME } from './config.js';
-import { h, mount, toast, modal, fileDropZone, confirmDialog, alertBox } from './core/ui.js';
-import { getSession, getCurrentState, clearSession, replaceState, onStateChange } from './core/storage.js';
-import { downloadBackup, readBackupFile } from './core/backup.js';
+import { h, mount, alertBox, confirmDialog, isNetworkError } from './core/ui.js';
+import { getSession, getCurrentState, clearSession, onStateChange, isDraftPending, onDraftPendingChange, isPersistentStorage, setReturnTo } from './core/storage.js';
+import { saveBackupNow, openLoadBackupDialog } from './components/backup-actions.js';
 import { formatTimestamp } from './core/time.js';
 
 /**
@@ -31,6 +31,11 @@ const ROUTES = [
 const app = document.getElementById('app');
 let cleanup = null;
 let renderToken = 0;
+let firstRender = true;
+
+// Ansage des Seitenwechsels für Bildschirmleser (liegt außerhalb von #app und bleibt erhalten).
+const announcer = h('div', { class: 'visually-hidden', 'aria-live': 'polite', 'data-testid': 'route-announcer' });
+document.body.appendChild(announcer);
 
 function parseHash() {
   const raw = location.hash.replace(/^#/, '') || '/';
@@ -43,6 +48,8 @@ function parseHash() {
   } catch {
     path = pathPart;
   }
+  // Tolerant: „#/Eltern“, „#/lehrkraft/klasse/5A“ oder ein Schrägstrich am Ende führen zur selben Seite.
+  path = path.trim().toLowerCase().replace(/\/+$/, '');
   return { path: path || '/', query: new URLSearchParams(queryString) };
 }
 
@@ -79,10 +86,29 @@ function parentHeader() {
 
 function teacherHeader(state) {
   const t = state.teacher;
-  const savedInfo = h('span', { class: 'save-indicator', title: 'Alle Änderungen werden automatisch in diesem Browser gespeichert.' }, `Automatisch gespeichert: ${formatTimestamp(state.savedAt)}`);
+  const persistent = isPersistentStorage();
+  const savedInfo = h('span', { class: 'save-indicator', 'data-testid': 'save-indicator' });
+  let savedAt = state.savedAt;
+  const updateSaved = () => {
+    const pending = isDraftPending();
+    if (!persistent) {
+      savedInfo.textContent = 'Achtung: Dieser Browser speichert nichts dauerhaft. Bitte speichern Sie regelmäßig einen Zwischenstand.';
+      savedInfo.title = 'Beim Schließen oder Neuladen gehen die Daten sonst verloren (z. B. im privaten Modus).';
+    } else if (pending) {
+      savedInfo.textContent = `Zuletzt gespeichert: ${formatTimestamp(savedAt)} · Ihre Eingaben auf dieser Seite sind noch nicht gespeichert`;
+      savedInfo.title = 'Die Angaben zum Elternsprechtag werden erst mit dem Knopf unten auf dieser Seite gespeichert. Ein Zwischenstand enthält sie trotzdem.';
+    } else {
+      savedInfo.textContent = `Automatisch gespeichert: ${formatTimestamp(savedAt)}`;
+      savedInfo.title = 'Alle Änderungen werden automatisch in diesem Browser gespeichert.';
+    }
+    savedInfo.classList.toggle('save-indicator-warning', !persistent || pending);
+  };
+  updateSaved();
   const unsubscribe = onStateChange((s) => {
-    savedInfo.textContent = `Automatisch gespeichert: ${formatTimestamp(s.savedAt)}`;
+    savedAt = s.savedAt;
+    updateSaved();
   });
+  const unsubscribeDraft = onDraftPendingChange(updateSaved);
   const header = h(
     'header',
     { class: 'site-header teacher-header' },
@@ -103,15 +129,18 @@ function teacherHeader(state) {
         h(
           'div',
           { class: 'header-actions' },
-          h('button', { type: 'button', class: 'btn btn-small btn-secondary', onclick: onSaveBackup, 'data-action': 'backup-save' }, 'Zwischenstand speichern'),
-          h('button', { type: 'button', class: 'btn btn-small btn-secondary', onclick: onLoadBackup, 'data-action': 'backup-load' }, 'Zwischenstand laden'),
+          h('button', { type: 'button', class: 'btn btn-small btn-secondary', onclick: saveBackupNow, 'data-action': 'backup-save' }, 'Zwischenstand speichern'),
+          h('button', { type: 'button', class: 'btn btn-small btn-secondary', onclick: () => openLoadBackupDialog({ navigate }), 'data-action': 'backup-load' }, 'Zwischenstand laden'),
           h('button', { type: 'button', class: 'btn btn-small btn-ghost', onclick: onLogout }, 'Abmelden'),
         ),
       ),
     ),
     h('div', { class: 'container' }, savedInfo),
   );
-  header._cleanup = unsubscribe;
+  header._cleanup = () => {
+    unsubscribe();
+    unsubscribeDraft();
+  };
   return header;
 }
 
@@ -121,48 +150,6 @@ function footer() {
     { class: 'site-footer' },
     h('div', { class: 'container footer-inner' }, h('span', {}, `${APP_NAME} – Elternsprechtage einfach organisieren`), h('a', { href: '#/datenschutz' }, 'Datenschutz-Hinweise')),
   );
-}
-
-function onSaveBackup() {
-  const state = getCurrentState();
-  if (!state) return;
-  const name = downloadBackup(state);
-  toast(`Zwischenstand gespeichert: „${name}“`, 'success');
-}
-
-function onLoadBackup() {
-  const state = getCurrentState();
-  if (!state) return;
-  const status = h('div', {});
-  const dlg = modal({
-    title: 'Zwischenstand laden',
-    content: [
-      h('p', {}, 'Laden Sie eine Datei „Zwischenspeicher vom … für ParentsDay“ hoch. Der aktuelle Stand in diesem Browser wird dadurch ersetzt.'),
-      fileDropZone({
-        accept: '.json,application/json',
-        label: 'Zwischenspeicher-Datei auswählen oder hierher ziehen',
-        onFiles: async ([file]) => {
-          try {
-            const loaded = await readBackupFile(file, state.teacher.teacherCode);
-            const ok = await confirmDialog({
-              title: 'Stand ersetzen?',
-              message: `Der Zwischenstand vom ${formatTimestamp(loaded.savedAt)} ersetzt alle aktuellen Daten in diesem Browser.`,
-              confirmText: 'Ja, laden',
-            });
-            if (!ok) return;
-            replaceState(loaded);
-            dlg.close();
-            toast('Zwischenstand geladen.', 'success');
-            render();
-          } catch (err) {
-            mount(status, alertBox('error', err.message));
-          }
-        },
-      }),
-      status,
-    ],
-    actions: [{ label: 'Schließen', variant: 'secondary' }],
-  });
 }
 
 async function onLogout() {
@@ -180,8 +167,89 @@ function setTitle(title) {
   document.title = title ? `${title} – ${APP_NAME}` : `${APP_NAME} – Elternsprechtag`;
 }
 
+// Höhe der klebenden Kopfzeile als CSS-Variable: fokussierte Felder werden nicht von ihr verdeckt
+// (scroll-padding-top in base.css).
+const headerObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(updateHeaderHeight) : null;
+function updateHeaderHeight() {
+  const header = app.querySelector('.site-header');
+  if (!header) return;
+  const sticky = getComputedStyle(header).position === 'sticky';
+  document.documentElement.style.setProperty('--header-h', `${sticky ? Math.ceil(header.getBoundingClientRect().height) : 0}px`);
+}
+
+/** Seite „Seite nicht gefunden“ (statt stiller Umleitung auf die Startseite). */
+function renderNotFound(main, loggedIn) {
+  setTitle('Seite nicht gefunden');
+  mount(
+    main,
+    h(
+      'div',
+      { class: 'card card-narrow stack' },
+      h('h1', {}, 'Seite nicht gefunden'),
+      h('p', {}, 'Diese Adresse gibt es in ParentsDay nicht. Vielleicht wurde sie falsch abgetippt oder gekürzt.'),
+      h(
+        'div',
+        { class: 'cluster' },
+        loggedIn ? h('a', { class: 'btn btn-primary', href: '#/lehrkraft/klassen', 'data-testid': 'notfound-classes' }, 'Zu Ihren Klassen') : null,
+        h('a', { class: `btn ${loggedIn ? 'btn-secondary' : 'btn-primary'}`, href: '#/' }, 'Zur Startseite'),
+        loggedIn ? null : h('a', { class: 'btn btn-secondary', href: '#/eltern' }, 'Zugang für Eltern'),
+      ),
+    ),
+  );
+}
+
+/** Fehler beim Laden einer Seite: verständlicher Text und Knopf zum Neuladen, keine technischen Meldungen. */
+function renderLoadError(main, err) {
+  const network = isNetworkError(err);
+  mount(
+    main,
+    alertBox(
+      'error',
+      h(
+        'p',
+        {},
+        h('strong', {}, 'Die Seite konnte nicht geladen werden. '),
+        network ? 'Bitte prüfen Sie Ihre Internetverbindung und laden Sie die Seite danach neu.' : 'Bitte laden Sie die Seite neu. Ihre Daten bleiben in diesem Browser gespeichert.',
+      ),
+      h('p', {}, h('button', { type: 'button', class: 'btn btn-primary', 'data-action': 'reload', onclick: () => location.reload() }, 'Seite neu laden')),
+    ),
+  );
+}
+
+// Seiten desselben Bereichs im Hintergrund vorladen – bricht die Verbindung später ab, lassen sie sich trotzdem öffnen.
+const preloaded = new Set();
+function preloadViews(layout) {
+  if (preloaded.has(layout)) return;
+  preloaded.add(layout);
+  const run = () => {
+    for (const route of ROUTES) if (route.layout === layout) route.load().catch(() => {});
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 3000 });
+  else setTimeout(run, 1000);
+}
+
+/** Fokus auf die Überschrift der neuen Seite und Ansage des Titels (nicht beim ersten Aufruf). */
+function focusNewPage(main) {
+  const active = document.activeElement;
+  if (active && active !== document.body && active !== main && active.isConnected) return; // Seite hat den Fokus selbst gesetzt
+  const heading = main.querySelector('h1');
+  if (heading) {
+    if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+    heading.focus({ preventScroll: true });
+  } else {
+    main.focus({ preventScroll: true });
+  }
+}
+
+function announce(text) {
+  announcer.textContent = '';
+  setTimeout(() => (announcer.textContent = text), 60);
+}
+
 async function render() {
   const token = ++renderToken;
+  const initial = firstRender;
+  firstRender = false;
   if (typeof cleanup === 'function') {
     try {
       cleanup();
@@ -194,30 +262,40 @@ async function render() {
 
   const { path, query } = parseHash();
   const route = ROUTES.find((r) => r.path.test(path));
-  if (!route) {
-    navigate('/', { replace: true });
-    return;
-  }
-  const params = { ...(route.params || {}) };
-  if (route.classRoute) {
+  const params = { ...(route?.params || {}) };
+  if (route?.classRoute) {
     const m = route.path.exec(path);
     params.classId = `${m[1]}${m[2]}`;
   }
 
   let state = null;
-  if (route.layout === 'teacher') {
+  if (route?.layout === 'teacher') {
     state = getSession() ? getCurrentState() : null;
     if (!state) {
+      // Nach der Anmeldung geht es auf der gewünschten Seite weiter.
+      setReturnTo(path);
       navigate('/lehrkraft/anmelden', { replace: true });
       return;
     }
   }
+  const notFoundState = route ? null : getSession() ? getCurrentState() : null;
+  const layout = route ? route.layout : notFoundState ? 'teacher' : 'public';
 
   const main = h('main', { id: 'main', class: 'container main', tabindex: '-1' });
-  const header = route.layout === 'teacher' ? teacherHeader(state) : route.layout === 'parent' ? parentHeader() : publicHeader();
+  const header = layout === 'teacher' ? teacherHeader(state || notFoundState) : layout === 'parent' ? parentHeader() : publicHeader();
   mount(app, h('a', { class: 'skip-link', href: '#main', onclick: (e) => (e.preventDefault(), main.focus()) }, 'Zum Inhalt springen'), header, main, footer());
+  headerObserver?.disconnect();
+  headerObserver?.observe(header);
+  updateHeaderHeight();
   setTitle('');
   window.scrollTo(0, 0);
+
+  if (!route) {
+    renderNotFound(main, Boolean(notFoundState));
+    if (!initial) focusNewPage(main);
+    announce(document.title);
+    return;
+  }
 
   try {
     const mod = await route.load();
@@ -236,9 +314,15 @@ async function render() {
       return;
     }
     cleanup = typeof result === 'function' ? result : null;
+    preloadViews(route.layout);
+    if (!initial) {
+      focusNewPage(main);
+      announce(document.title);
+    }
   } catch (err) {
     console.error(err);
-    mount(main, alertBox('error', h('strong', {}, 'Die Seite konnte nicht geladen werden. '), err.message || String(err)));
+    if (token !== renderToken) return;
+    renderLoadError(main, err);
   }
 }
 

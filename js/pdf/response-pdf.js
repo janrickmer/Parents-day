@@ -192,7 +192,7 @@ export async function createResponsePdf(payload, eventInfo) {
   y = ensureSpace(doc, y + 1, 45);
   y = writeParagraph(doc, 'Verfügbare Zeiten', y, { size: 14, bold: true, color: COLORS.primary, spacingAfter: 1.5 });
   if (slotMinutes) {
-    y = writeParagraph(doc, `Gesprächsraster: ${slotMinutes} Minuten`, y, { size: 9.5, color: COLORS.muted, spacingAfter: 1.5 });
+    y = writeParagraph(doc, `Terminlänge: ${slotMinutes} Minuten`, y, { size: 9.5, color: COLORS.muted, spacingAfter: 1.5 });
   }
   y = drawLegend(doc, y + 0.5);
 

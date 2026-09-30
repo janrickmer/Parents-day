@@ -1,7 +1,7 @@
 // Klassenübersicht (#/lehrkraft/klassen): Zusammenfassung des Elternsprechtags, neue Klasse anlegen
 // (Jahrgangsstufe 1–13, Buchstabe a–h), Klassen als Kacheln und gesammelter Upload der Rückmeldungen.
 
-import { h, mount, toast, alertBox, plural } from '../core/ui.js';
+import { h, mount, alertBox, plural } from '../core/ui.js';
 import { updateState, getCurrentState, findClass } from '../core/storage.js';
 import { classId as makeClassId } from '../core/codes.js';
 import { WEEKDAYS_SHORT, parseIsoDate, formatDate, formatRange } from '../core/time.js';
@@ -185,8 +185,8 @@ export default function render(ctx) {
     }
     lastCreatedAt = Date.now();
     letterSelect.value = '';
+    // Die Meldung steht auf der Seite – kein zusätzlicher Toast
     mount(createMsg, alertBox('success', `Die Klasse ${id} wurde angelegt. Öffnen Sie die Kachel, um die Lernenden einzutragen.`));
-    toast(`Klasse ${id} angelegt.`, 'success');
     renderTiles(id);
   }
 

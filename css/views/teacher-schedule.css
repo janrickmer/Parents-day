@@ -285,7 +285,7 @@
 }
 .sched-pool-empty {
   padding: 6px 0 2px;
-  color: var(--c-success);
+  color: var(--c-success-text);
   font-weight: 600;
 }
 .sched-drop-hint {
@@ -481,6 +481,8 @@
   flex-direction: column;
   min-width: 0;
   width: 100%;
+  /* Für die Kurzform der Dauer in schmalen Spalten */
+  container-type: inline-size;
 }
 .sched-appt-row {
   display: flex;
@@ -488,24 +490,45 @@
   gap: 5px;
   min-width: 0;
 }
+/* Name und Dauer: gekürzt wird nur der Name – die Dauer in Klammern bleibt immer sichtbar */
 .sched-appt-text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3em;
+  min-width: 0;
+  max-width: 100%;
+}
+.sched-appt-name {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-.sched-appt-name {
   font-weight: 700;
 }
 /* Ab 20 Minuten darf der Name in schmalen Spalten auf zwei Zeilen umbrechen */
-.sched-appt-tall .sched-appt-text {
+.sched-appt-tall .sched-appt-name {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 .sched-appt-dur {
+  flex-shrink: 0;
+  white-space: nowrap;
   opacity: 0.9;
+}
+.sched-dur-short {
+  display: none;
+}
+/* Sehr schmale Blöcke (z. B. Smartphone): Kurzform „(10′)“, damit mehr vom Namen zu sehen ist */
+@container (max-width: 150px) {
+  .sched-dur-long {
+    display: none;
+  }
+  .sched-dur-short {
+    display: inline;
+  }
 }
 .sched-appt-time {
   font-size: 0.75rem;
@@ -669,11 +692,15 @@
   box-shadow: var(--shadow-strong);
 }
 .sched-preview-text {
+  display: flex;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  max-width: 100%;
   font-weight: 700;
+  container-type: inline-size;
+  flex: 1;
+}
+.sched-preview .sched-appt-dur {
+  font-weight: 400;
 }
 
 /* Geister-Element am Zeiger */

@@ -2,11 +2,14 @@
 // „Absenden“ (Rückmelde-PDF herunterladen) und vorbereitete E-Mail an die Lehrkraft.
 // Die Termindaten kommen aus dem Link des Elternbriefs (#/eltern?e=…) oder aus dem Termin-Schlüssel.
 // Alles bleibt im Browser der Eltern (loadParentState/saveParentState), es gibt keinen Server.
+// Jeder Tab hat seinen eigenen Stand: Eltern, die die QR-Codes von Geschwistern in zwei Tabs öffnen,
+// schicken so jede Rückmeldung an die richtige Lehrkraft.
 
-import { h, mount, toast, field, alertBox, copyToClipboard, confirmDialog } from '../core/ui.js';
+import { MAX_EVENT_DAYS, SLOT_MIN, KEY_SLOT_MAX, ADDRESS_MAX_CHARS, ADDRESS_MAX_LINES, NAME_MAX_LENGTH } from '../config.js';
+import { h, mount, toast, field, alertBox, copyToClipboard, confirmDialog, friendlyError as friendlyText } from '../core/ui.js';
 import { loadParentState, saveParentState, clearParentState } from '../core/storage.js';
 import { decodeEventParam, decodeEventKey, buildResponsePayload, encodeResponseText } from '../core/transport.js';
-import { checkStudentLogin, cleanName, parseStudentCode, studentNameCode, isValidIsoDate, isValidEmail } from '../core/codes.js';
+import { checkStudentLogin, cleanName, parseStudentCode, studentNameCode, isValidIsoDate, isValidEmail, codesEqual, teacherCodesMatch } from '../core/codes.js';
 import { slotStarts, slotsToRanges, formatRanges, formatDateLong, formatDateWithWeekday, formatRange, formatTimestamp, fromMinutes, toMinutes } from '../core/time.js';
 import { savePdf, preloadPdf } from '../core/pdf.js';
 import { createResponsePdf } from '../pdf/response-pdf.js';
@@ -38,11 +41,46 @@ function classInfo(ps) {
   };
 }
 
-/** Sind die Termindaten verwendbar (echte Kalendertage, Uhrzeiten HH:MM, Ende nach Beginn)? */
+/**
+ * Sind die Termindaten verwendbar? Es gelten dieselben Grenzen wie für die Lehrkraft: 1–8 verschiedene
+ * echte Kalendertage, Uhrzeiten HH:MM auf 5 Minuten, Ende nach Beginn, Terminlänge in 5-Minuten-Schritten.
+ * (Ein manipulierter Link mit tausenden Zeitslots würde die Seite sonst lahmlegen.)
+ */
 function isValidEvent(ev) {
   const slot = Number(ev?.slotMinutes);
-  if (!Number.isInteger(slot) || slot <= 0 || slot > 600 || !Array.isArray(ev?.days) || ev.days.length === 0) return false;
-  return ev.days.every((d) => d && isValidIsoDate(d.date) && TIME_RE.test(d.start) && TIME_RE.test(d.end) && toMinutes(d.end) > toMinutes(d.start));
+  if (!Number.isInteger(slot) || slot < SLOT_MIN || slot > KEY_SLOT_MAX || slot % 5 !== 0) return false;
+  if (!Array.isArray(ev?.days) || ev.days.length === 0 || ev.days.length > MAX_EVENT_DAYS) return false;
+  const dates = new Set();
+  return ev.days.every((d) => {
+    if (!d || !isValidIsoDate(d.date) || dates.has(d.date) || !TIME_RE.test(d.start) || !TIME_RE.test(d.end)) return false;
+    dates.add(d.date);
+    const s = toMinutes(d.start);
+    const e = toMinutes(d.end);
+    return s % 5 === 0 && e % 5 === 0 && e > s;
+  });
+}
+
+/** Texte aus Link bzw. Speicher auf die Grenzen der Lehrkraft-Formulare kürzen; ungültige E-Mail verwerfen. */
+function cleanEvent(ev) {
+  const address = String(ev.schoolAddress || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, ADDRESS_MAX_LINES)
+    .join('\n')
+    .slice(0, ADDRESS_MAX_CHARS);
+  const email = String(ev.teacherEmail || '').trim();
+  const teacherCode = String(ev.teacherCode || '');
+  const classId = String(ev.classId || '').toLowerCase();
+  return {
+    ...ev,
+    teacherName: cleanName(ev.teacherName).slice(0, 2 * NAME_MAX_LENGTH + 1),
+    // Nur echte Adressen: sonst könnte ein veränderter Link weitere Empfänger in die E-Mail schmuggeln.
+    teacherEmail: isValidEmail(email) ? email : '',
+    teacherCode: /^\p{L}\d{1,12}\p{L}$/u.test(teacherCode) ? teacherCode : '',
+    schoolAddress: address,
+    classId: /^(1[0-3]|[1-9])[a-h]$/.test(classId) ? classId : '',
+  };
 }
 
 /** Elternzustand laden; unbrauchbare (z. B. von Hand veränderte) Termindaten werden verworfen. */
@@ -55,6 +93,10 @@ function loadState() {
     ps.selection = {};
     clearSubmission(ps);
   }
+  if (ps.event) ps.event = cleanEvent(ps.event);
+  // Termindaten aus einem Termin-Schlüssel ohne bekannte Lehrkraft (älterer Stand nach dem Abmelden):
+  // Für das nächste Kind wird der Schlüssel neu abgefragt.
+  if (ps.event?.source === 'key' && !ps.login && !ps.event.teacherCode) ps.event = null;
   return ps;
 }
 
@@ -67,7 +109,7 @@ function readEventParam(param) {
     throw new Error(LINK_ERROR);
   }
   if (!isValidEvent(ev)) throw new Error(LINK_ERROR);
-  return ev;
+  return cleanEvent(ev);
 }
 
 function expectedFor(event) {
@@ -90,8 +132,11 @@ function logout(ps) {
   ps.login = null;
   ps.selection = {};
   clearSubmission(ps);
-  // Beim Termin-Schlüssel stammen Klasse und Lehrkräftecode aus dem Code des Kindes.
-  if (ps.event?.source === 'key') ps.event = { ...ps.event, classId: '', teacherCode: '' };
+  // Die eingetippte Adresse gehört zur Lehrkraft dieses Kindes.
+  delete ps.teacherEmailInput;
+  delete ps.teacherEmailFor;
+  // Beim Termin-Schlüssel bleiben Klasse und Lehrkräftecode des Kindes stehen: Ein Kind aus einem
+  // anderen Elternbrief muss dann dessen Termin-Schlüssel eingeben (andere Tage, andere Lehrkraft).
 }
 
 /** Übernimmt neue Termindaten. Anmeldung und Auswahl bleiben nur erhalten, wenn sie weiterhin passen. */
@@ -156,7 +201,7 @@ function setBusy(button, busy, busyLabel = '') {
 function friendlyError(err) {
   const msg = err?.message || String(err || '');
   if (/noch nicht implementiert/i.test(msg)) return 'Diese Funktion steht gerade noch nicht zur Verfügung. Bitte versuchen Sie es später noch einmal.';
-  return msg || 'Unbekannter Fehler.';
+  return friendlyText(err);
 }
 
 /** Eingabefeld, dessen id zugleich der data-testid ist. */
@@ -282,16 +327,37 @@ function renderLogin(ctx) {
   }
 
   function loginForm() {
-    const needsKey = !event;
+    // Ohne Termindaten wird der Termin-Schlüssel gebraucht; mit Termindaten erscheint das Feld, sobald der
+    // Code zu einem anderen Elternbrief gehört (Geschwisterkind) oder die Eltern es selbst öffnen.
+    let keyShown = !event;
     const first = input('parent-firstname', { autocomplete: 'off', required: true });
     const last = input('parent-lastname', { autocomplete: 'off', required: true });
     const code = input('parent-code', { class: 'parent-code-input', autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', required: true });
-    const key = needsKey ? input('parent-key', { class: 'parent-code-input', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false', required: true, placeholder: 'z. B. 1A2B-3C4D-…' }) : null;
+    const key = input('parent-key', { class: 'parent-code-input', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false', required: true, placeholder: 'z. B. 1A2B-3C4D-…' });
+    const keyField = formField('Termin-Schlüssel', key, {
+      hint: 'Steht im Elternbrief unter dem gelben Kasten („Ohne QR-Code: Termin-Schlüssel …“). Einfacher ist es, den QR-Code zu scannen.',
+      full: true,
+    });
     const errorHost = h('div', { class: 'parent-login-error', 'aria-live': 'polite' });
     const submit = h('button', { type: 'submit', class: 'btn btn-primary btn-large btn-block', 'data-testid': 'parent-login' }, 'Anmelden');
 
+    const grid = h(
+      'div',
+      { class: 'form-grid' },
+      formField('Vorname des Kindes', first),
+      formField('Nachname des Kindes', last),
+      formField('Code', code, { hint: 'Der Code steht im gelben Kasten des Elternbriefs.', full: true }),
+    );
+    // Das Feld steht nur im Formular, wenn es gebraucht wird.
+    const setKeyShown = (on) => {
+      keyShown = on;
+      if (on && !keyField.isConnected) grid.appendChild(keyField);
+      if (!on) keyField.remove();
+    };
+    setKeyShown(keyShown);
+
     const showError = (message, invalid) => {
-      for (const el of [first, last, code, key].filter(Boolean)) {
+      for (const el of [first, last, code, key]) {
         if (invalid.includes(el)) el.setAttribute('aria-invalid', 'true');
         else el.removeAttribute('aria-invalid');
       }
@@ -302,26 +368,49 @@ function renderLogin(ctx) {
     const onSubmit = (e) => {
       e.preventDefault();
       const values = { firstName: first.value, lastName: last.value, code: code.value };
-      const result = checkStudentLogin(values, needsKey || event.source === 'key' ? {} : expectedFor(event));
-      if (!result.ok) {
-        showError(result.error, invalidFields(values, { first, last, code }));
-        return;
-      }
+      const typedKey = keyShown ? key.value.trim() : '';
+      let result;
       let ev = event;
-      if (needsKey) {
-        try {
-          ev = decodeEventKey(key.value);
-        } catch (err) {
-          showError(key.value.trim() ? err.message : 'Bitte geben Sie den Termin-Schlüssel aus dem Elternbrief ein.', [key]);
+      if (event && !typedKey) {
+        // Termindaten aus dem Link (bzw. vom ersten Kind mit Termin-Schlüssel): Code muss zu Lehrkraft und Klasse passen
+        result = checkStudentLogin(values, expectedFor(event));
+        if (!result.ok && (result.reason === 'teacher' || result.reason === 'class')) {
+          setKeyShown(true);
+          showError(result.error, [key]);
           return;
         }
+        if (!result.ok) {
+          showError(result.error, invalidFields(values, { first, last, code }));
+          return;
+        }
+      } else {
+        result = checkStudentLogin(values, {});
+        if (!result.ok) {
+          showError(result.error, invalidFields(values, { first, last, code }));
+          return;
+        }
+        if (!typedKey) {
+          showError('Bitte geben Sie den Termin-Schlüssel aus dem Elternbrief ein.', [key]);
+          return;
+        }
+        try {
+          // Der Schlüssel passt nur zu Lehrkraft und Klasse aus dem Code (Tippfehler dort fallen hier auf).
+          ev = decodeEventKey(key.value, { teacherCode: result.parsed.teacherCode, classId: result.parsed.classId });
+        } catch (err) {
+          showError(err.message, err.mismatch ? [key, code] : [key]);
+          return;
+        }
+        ev = { ...ev, classId: result.parsed.classId, teacherCode: result.parsed.teacherCode };
       }
-      if (ev.source === 'key') ev = { ...ev, classId: result.parsed.classId, teacherCode: result.parsed.teacherCode };
       const s = loadState();
       const login = { firstName: cleanName(values.firstName), lastName: cleanName(values.lastName), code: result.code };
       if (!s.login || s.login.code !== login.code || !s.event || !sameSchedule(s.event, ev)) {
         s.selection = {};
         clearSubmission(s);
+      }
+      if (!s.login || s.login.code !== login.code) {
+        delete s.teacherEmailInput;
+        delete s.teacherEmailFor;
       }
       s.event = ev;
       s.login = login;
@@ -333,33 +422,22 @@ function renderLogin(ctx) {
       'form',
       { class: 'card stack parent-login', novalidate: true, onsubmit: onSubmit },
       h('h2', {}, 'Anmeldung für Eltern'),
-      needsKey
+      !event
         ? alertBox(
             'info',
             h('p', {}, h('strong', {}, 'Tipp: '), 'Am einfachsten scannen Sie den QR-Code im Elternbrief mit der Kamera Ihres Smartphones. Dann sind die Termine schon eingetragen.'),
           )
         : h('p', { class: 'muted' }, 'Bitte geben Sie die Angaben genau so ein, wie sie im gelben Kasten des Elternbriefs stehen.'),
-      h(
-        'div',
-        { class: 'form-grid' },
-        formField('Vorname des Kindes', first),
-        formField('Nachname des Kindes', last),
-        formField('Code', code, { hint: 'Der Code steht im gelben Kasten des Elternbriefs.', full: true }),
-        needsKey
-          ? formField('Termin-Schlüssel', key, {
-              hint: 'Steht im Elternbrief unter dem gelben Kasten („Ohne QR-Code: Termin-Schlüssel …“). Einfacher ist es, den QR-Code zu scannen.',
-              full: true,
-            })
-          : null,
-      ),
+      grid,
       errorHost,
       submit,
-      event?.source === 'key'
+      event
         ? h(
             'button',
             {
               type: 'button',
               class: 'btn btn-ghost btn-small parent-other-key',
+              'data-testid': 'parent-other-key',
               onclick: () => {
                 const s = loadState();
                 s.event = null;
@@ -368,7 +446,7 @@ function renderLogin(ctx) {
                 ctx.rerender();
               },
             },
-            'Anderer Elternsprechtag? Termin-Schlüssel neu eingeben',
+            'Anderer Elternbrief? Termin-Schlüssel eingeben',
           )
         : null,
     );
@@ -434,7 +512,7 @@ function renderTimes(ctx) {
       fact('Kind', childName(ps.login)),
       info.classId ? fact('Klasse', info.classId) : null,
       event.teacherName ? fact('Lehrkraft', event.teacherName) : null,
-      fact('Gesprächsraster', `${slot} Minuten`),
+      fact('Terminlänge', `${slot} Minuten`),
       event.schoolAddress ? fact('Schule', schoolLine(event.schoolAddress), true) : null,
       fact(
         days.length === 1 ? 'Elternsprechtag' : 'Elternsprechtage',
@@ -607,7 +685,7 @@ function renderTimes(ctx) {
         'div',
         { class: 'parent-day-head' },
         h('h2', { id: `parent-day-${day.date}` }, formatDateLong(day.date)),
-        h('p', { class: 'muted small' }, `${day.start} bis ${day.end} Uhr · ${day.starts.length} Zeitslots à ${slot} Minuten`),
+        h('p', { class: 'muted small' }, `${day.start} bis ${day.end} Uhr · ${day.starts.length} Zeitslots · Terminlänge ${slot} Minuten`),
       ),
       day.starts.length
         ? [
@@ -731,8 +809,11 @@ function mailBody(ps, filename, { compact = false } = {}) {
 }
 
 function mailtoHref(email, subject, body) {
-  // Empfänger unverschlüsselt; Leerzeichen und Zeichen, die den Link zerteilen würden, fallen weg.
-  const to = String(email || '').replace(/[\s?#&]+/g, '');
+  // Empfänger kodieren: Komma, Semikolon, %2C oder Zeilenumbrüche ergeben so keinen zweiten Empfänger.
+  // „@“ und „+“ bleiben lesbar.
+  const to = encodeURIComponent(String(email || '').replace(/\s+/g, ''))
+    .replace(/%40/g, '@')
+    .replace(/%2B/gi, '+');
   return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
@@ -759,12 +840,20 @@ function renderDone(ctx) {
     navigate('/eltern', { replace: true });
     return;
   }
-  if (!ps.lastPayload) {
+  const info = classInfo(ps);
+  const payload = ps.lastPayload;
+  // Die Rückmeldung muss zum angemeldeten Kind und zu dessen Lehrkraft gehören – sonst ginge die E-Mail
+  // an die falsche Adresse.
+  const matches =
+    payload &&
+    codesEqual(payload.code, ps.login.code) &&
+    (!payload.teacherCode || !info.teacherCode || teacherCodesMatch(payload.teacherCode, info.teacherCode)) &&
+    (!payload.classId || !info.classId || payload.classId === info.classId);
+  if (!matches) {
     navigate('/eltern/zeiten', { replace: true });
     return;
   }
   setTitle('Fast geschafft');
-  const payload = ps.lastPayload;
   const event = ps.event;
   const filename = ps.lastFilename || 'Rückmeldung.pdf';
   const subject = mailSubject(payload);
@@ -800,7 +889,8 @@ function renderDone(ctx) {
       autocapitalize: 'off',
       spellcheck: 'false',
       'data-testid': 'parent-teacher-email',
-      value: ps.teacherEmailInput || '',
+      // Nur vorbelegen, wenn die Adresse für die Lehrkraft dieses Kindes eingetippt wurde
+      value: ps.teacherEmailInput && ps.teacherEmailFor && teacherCodesMatch(ps.teacherEmailFor, info.teacherCode) ? ps.teacherEmailInput : '',
       placeholder: 'name@schule.de',
     });
     emailInput.addEventListener('input', () => {
@@ -809,6 +899,7 @@ function renderDone(ctx) {
       if (!value || isValidEmail(value)) emailInput.removeAttribute('aria-invalid');
       const s = loadState();
       s.teacherEmailInput = value;
+      s.teacherEmailFor = info.teacherCode;
       saveParentState(s);
     });
     // Erst beim Verlassen des Feldes prüfen, nicht bei jedem Tastendruck.

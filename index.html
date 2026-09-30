@@ -2,6 +2,11 @@
 <html lang="de">
   <head>
     <meta charset="utf-8" />
+    <!-- Nur eigene Skripte und Stile; keine fremden Server, kein eval. Stil-Angaben setzt der Code über CSSOM. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ParentsDay – Elternsprechtag</title>
     <meta name="description" content="ParentsDay – Termine für den Elternsprechtag einfach zwischen Lehrkräften und Eltern abstimmen." />
@@ -21,7 +26,7 @@
   <body>
     <div id="app">
       <noscript>
-        <p style="padding: 2rem">ParentsDay benötigt JavaScript. Bitte aktivieren Sie JavaScript in Ihrem Browser.</p>
+        <p class="noscript-note">ParentsDay benötigt JavaScript. Bitte aktivieren Sie JavaScript in Ihrem Browser.</p>
       </noscript>
     </div>
   </body>

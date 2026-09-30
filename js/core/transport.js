@@ -280,7 +280,7 @@ export function validateResponsePayload(obj) {
     app: 'ParentsDay',
     type: 'parent-response',
     v: 1,
-    code: text(obj.code, 120),
+    code: text(obj.code, 400),
     firstName: text(obj.firstName),
     lastName: text(obj.lastName),
     classId: text(obj.classId, 10),

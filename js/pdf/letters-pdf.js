@@ -203,7 +203,7 @@ function introText(days, lean = false) {
   return lean ? when : `${when} Ich freue mich darauf, mit Ihnen über Ihr Kind ins Gespräch zu kommen.`;
 }
 
-/** Hellblauer Kasten mit Tagen, Uhrzeiten und Gesprächsraster. */
+/** Hellblauer Kasten mit Tagen, Uhrzeiten und Terminlänge. */
 function daysPanel(doc, draw, y, ctx, mode) {
   const pad = 4;
   const lh = lineHeight(doc, mode.size);
@@ -220,13 +220,13 @@ function daysPanel(doc, draw, y, ctx, mode) {
   let cy = y + pad;
   setText(doc, { size: mode.size, bold: true, color: COLORS.primary });
   doc.text(ctx.days.length === 1 ? 'Zeit des Elternsprechtags' : 'Zeiten des Elternsprechtags', PAGE.margin + pad, cy + lh * 0.75);
-  // Gesprächsraster rechtsbündig in derselben Zeile
+  // Terminlänge rechtsbündig in derselben Zeile
   const raster = `${ctx.slotMinutes} Minuten`;
   setText(doc, { size: mode.size });
   const rasterWidth = doc.getTextWidth(raster);
   setText(doc, { size: mode.size, bold: true });
-  const rasterX = PAGE.margin + CONTENT_WIDTH - pad - rasterWidth - doc.getTextWidth('Gesprächsraster: ');
-  richLine(doc, [{ text: 'Gesprächsraster: ', bold: true }, { text: raster }], rasterX, cy + lh * 0.75, mode.size);
+  const rasterX = PAGE.margin + CONTENT_WIDTH - pad - rasterWidth - doc.getTextWidth('Terminlänge: ');
+  richLine(doc, [{ text: 'Terminlänge: ', bold: true }, { text: raster }], rasterX, cy + lh * 0.75, mode.size);
   cy += lh + 1;
   const colWidth = (CONTENT_WIDTH - 2 * pad) / 2;
   ctx.days.forEach((d, i) => {
@@ -363,7 +363,7 @@ async function layoutLetter(doc, draw, top, ctx, student, mode) {
   const childName = `${student.firstName} ${student.lastName}`.trim();
   y = paragraph(doc, draw, `Liebe Eltern und Erziehungsberechtigte von ${childName},`, y, { size: mode.size, spacingAfter: 1.5 + g });
   y = paragraph(doc, draw, introText(ctx.days, mode.lean), y, { size: mode.size, spacingAfter: 1.5 + g });
-  const required = 'Für die Terminkoordination ist es erforderlich, dass Sie für den Elternsprechtag alle Terminslots angeben, zu denen Sie Zeit für ein Gespräch hätten.';
+  const required = 'Für die Terminkoordination ist es erforderlich, dass Sie für den Elternsprechtag alle Zeitslots angeben, zu denen Sie Zeit für ein Gespräch hätten.';
   if (mode.lean) y = paragraph(doc, draw, required, y, { size: mode.size, bold: true, spacingAfter: 2 });
   else {
     y = paragraph(doc, draw, required, y, { size: mode.size, bold: true, spacingAfter: 0.5 });
@@ -405,7 +405,8 @@ export async function createParentLettersPdf(state, classId) {
     teacherName: `${t.firstName || ''} ${t.lastName || ''}`.trim(),
     teacherEmail: t.email || '',
     link,
-    eventKey: encodeEventKey(state.event),
+    // Der Schlüssel passt nur zu Codes dieser Klasse und Lehrkraft (Prüfung bei der Anmeldung).
+    eventKey: encodeEventKey(state.event, { teacherCode: t.teacherCode, classId: cls.id }),
     date: nowParts().date,
     qrCells: await qrCellCount(link),
   };

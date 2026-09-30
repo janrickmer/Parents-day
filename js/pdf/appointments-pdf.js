@@ -12,13 +12,17 @@ const AVAILABILITY_TEXT = { ok: 'ja', partial: 'nur teilweise', unavailable: 'ne
 
 /** Spalten der Übersichtstabelle (Summe = CONTENT_WIDTH = 170 mm). */
 const OVERVIEW_COLUMNS = [
-  { header: 'Beginn', width: 17 },
-  { header: 'Ende', width: 17 },
-  { header: 'Dauer', width: 19 },
-  { header: 'Klasse', width: 17 },
-  { header: 'Kind (Eltern von …)', width: 60 },
-  { header: 'Eltern verfügbar', width: 40 },
+  { header: 'Beginn', width: 15 },
+  { header: 'Ende', width: 15 },
+  { header: 'Dauer', width: 17 },
+  { header: 'Klasse', width: 15 },
+  { header: 'Kind (Eltern von …)', width: 70 },
+  { header: 'Eltern verfügbar', width: 38 },
 ];
+/** Kompakter Satz der Übersicht: eine übliche Klasse (bis etwa 30 Termine) passt auf eine Seite. */
+const OVERVIEW_SIZE = 8.5;
+const OVERVIEW_PAD = 1.1;
+const SUMMARY_SIZE = 10;
 
 /** Dateiname, z. B. „ParentsDay Termine Klasse 5a.pdf“. */
 export function appointmentsFilename(classId) {
@@ -117,7 +121,7 @@ function drawConfirmationPage(doc, appt, ctx) {
   y += lh + 5;
 
   y = writeParagraph(doc, 'Ihr Gesprächstermin zum Elternsprechtag', y, { size: 17, bold: true, spacingAfter: 6 });
-  y = writeParagraph(doc, `Liebe Eltern von ${name},`, y, { spacingAfter: 2.5 });
+  y = writeParagraph(doc, `Liebe Eltern und Erziehungsberechtigte von ${name},`, y, { spacingAfter: 2.5 });
   y = writeParagraph(doc, 'hiermit bestätige ich Ihnen folgenden Gesprächstermin:', y, { spacingAfter: 4 });
 
   const rows = [
@@ -151,29 +155,51 @@ function drawOverview(doc, all, ctx, cls) {
     subtitle: 'Elternsprechtag – Übersicht für die Lehrkraft',
     rightText: `${ctx.teacherName}\nErstellt am ${ctx.created.date} um ${ctx.created.time} Uhr`,
   });
-  y = writeParagraph(doc, 'Übersicht der Gesprächstermine', y, { size: 17, bold: true, spacingAfter: 3 });
+  y = writeParagraph(doc, 'Übersicht der Gesprächstermine', y, { size: 15, bold: true, spacingAfter: 2 });
   const classIds = [...new Set(all.map((a) => a.classId))];
   const scope = classIds.length > 1 ? `aller Ihrer Klassen (${classIds.map((c) => `Klasse ${c}`).join(', ')})` : `aller Ihrer Klassen (zurzeit nur Klasse ${classIds[0]})`;
   y = writeParagraph(
     doc,
     `Für ${ctx.teacherName}: Diese Übersicht enthält die Termine ${scope}, sortiert nach Uhrzeit. So sehen Sie, wann die Eltern welchen Kindes kommen und bis wann das Gespräch dauert.`,
     y,
-    { size: 10, color: COLORS.muted, spacingAfter: 5 },
+    { size: 9, color: COLORS.muted, spacingAfter: 4 },
   );
 
   const firstPage = doc.getNumberOfPages();
   const continuedDay = new Map(); // Seite → Tag, dessen Tabelle oben auf dieser Seite weitergeht
   const dayInfo = new Map((ctx.days || []).map((d) => [d.date, d]));
   const dates = [...new Set(all.map((a) => a.date))].sort();
-  for (const date of dates) {
+
+  // Zeilen unter der letzten Tabelle: Summe und (falls vorhanden) Lernende ohne Termin. Sie werden vorher
+  // gemessen und bleiben mit den letzten Tabellenzeilen auf einer Seite – nie allein auf einer eigenen Seite.
+  const total = all.length;
+  const totalText = `Insgesamt ${total === 1 ? '1 Termin' : `${total} Termine`}.`;
+  const open = (cls.students || []).filter((s) => !s.appointment && fullName(s));
+  const openText = open.length ? `Noch ohne Termin in Klasse ${cls.id}: ${open.map(fullName).join(', ')}.` : '';
+  const lhSummary = lineHeight(doc, SUMMARY_SIZE);
+  setText(doc, { size: SUMMARY_SIZE });
+  const openLines = openText ? doc.splitTextToSize(openText, CONTENT_WIDTH).length : 0;
+  setText(doc);
+  const summaryHeight = lhSummary + 2 + (openLines ? openLines * lhSummary : 0);
+  const reserve = 4 + 2 + summaryHeight; // Abstand unter der Tabelle + Summenzeilen
+  const rowHeight = lineHeight(doc, OVERVIEW_SIZE) + 2 * OVERVIEW_PAD;
+  const headingHeight = lineHeight(doc, 12) + 2;
+
+  dates.forEach((date, index) => {
     const list = all.filter((a) => a.date === date);
     const day = dayInfo.get(date);
-    y = ensureSpace(doc, y, 32);
+    const isLast = index === dates.length - 1;
+    // Überschrift nicht allein am Seitenende: Tabellenkopf und die ersten Zeilen müssen darunter passen
+    const firstRows = isLast && list.length <= 2 ? list.length * rowHeight + reserve : 2 * rowHeight;
+    y = ensureSpace(doc, y, headingHeight + rowHeight + firstRows);
     const heading = `${formatDateWithWeekday(date)}${day ? ` · ${formatRange(day.start, day.end)}` : ''} · ${list.length === 1 ? '1 Termin' : `${list.length} Termine`}`;
     y = writeParagraph(doc, heading, y, { size: 12, bold: true, color: COLORS.primary, spacingAfter: 2 });
     const tableStart = doc.getNumberOfPages();
     y = drawTable(doc, y, {
       columns: OVERVIEW_COLUMNS,
+      size: OVERVIEW_SIZE,
+      pad: OVERVIEW_PAD,
+      reserveAfterLast: isLast ? reserve : 0,
       rows: list.map((a) => [
         fromMinutes(a.start),
         fromMinutes(a.end),
@@ -185,16 +211,11 @@ function drawOverview(doc, all, ctx, cls) {
     });
     for (let p = tableStart + 1; p <= doc.getNumberOfPages(); p++) continuedDay.set(p, date);
     y += 2;
-  }
+  });
 
-  const total = all.length;
-  y = ensureSpace(doc, y, 12);
-  y = writeParagraph(doc, `Insgesamt ${total === 1 ? '1 Termin' : `${total} Termine`}.`, y, { size: 10, bold: true, spacingAfter: 2 });
-  const open = (cls.students || []).filter((s) => !s.appointment && fullName(s));
-  if (open.length) {
-    y = ensureSpace(doc, y, 12);
-    writeParagraph(doc, `Noch ohne Termin in Klasse ${cls.id}: ${open.map(fullName).join(', ')}.`, y, { size: 10, color: COLORS.muted, spacingAfter: 0 });
-  }
+  y = ensureSpace(doc, y, summaryHeight);
+  y = writeParagraph(doc, totalText, y, { size: SUMMARY_SIZE, bold: true, spacingAfter: 2 });
+  if (openText) writeParagraph(doc, openText, y, { size: SUMMARY_SIZE, color: COLORS.muted, spacingAfter: 0 });
 
   // Folgeseiten der Übersicht: kurze Zeile über der Tabelle, damit klar ist, zu welchem Tag die Zeilen gehören
   const lastPage = doc.getNumberOfPages();

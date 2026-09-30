@@ -31,7 +31,7 @@ export default function render({ root, setTitle }) {
           'ol',
           { class: 'start-steps' },
           step('1', 'Registrieren oder anmelden', 'Sie erhalten eine PDF-Datei mit Ihrem Registrierungscode.'),
-          step('2', 'Elternsprechtag anlegen', 'Tage, Uhrzeiten, Adresse der Schule und Länge eines Termins festlegen.'),
+          step('2', 'Elternsprechtag anlegen', 'Tage, Uhrzeiten, Adresse der Schule und Terminlänge festlegen.'),
           step('3', 'Klassen und Lernende eintragen', 'Für jedes Kind entsteht ein Code und ein fertiger Elternbrief.'),
           step('4', 'Gespräche terminieren', 'Rückmeldungen der Eltern hochladen und Termine per Drag & Drop planen.'),
         ),

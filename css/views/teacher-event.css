@@ -410,7 +410,7 @@
   color: var(--c-muted);
 }
 .calp-grid th.calp-weekend {
-  color: #98a1b1;
+  color: #6b7385;
 }
 .calp-grid td {
   padding: 0;
@@ -519,4 +519,16 @@
   .calp-day {
     height: 40px;
   }
+}
+
+/* Hinweis auf einem neuen Gerät: Zwischenstand laden statt alles neu einzugeben */
+.evt-empty-device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.evt-empty-device p {
+  flex: 1 1 320px;
+  margin: 0;
 }

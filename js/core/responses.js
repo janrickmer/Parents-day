@@ -2,11 +2,13 @@
 // Quellen: Rückmelde-PDFs (Daten in den PDF-Metadaten), Textdateien/gespeicherte E-Mails (.txt, .eml)
 // und eingefügter E-Mail-Text mit dem Block PARENTSDAY[…].
 
+import { MAX_RESPONSE_FILE_BYTES } from '../config.js';
 import { extractPayloadFromFile } from './pdf.js';
 import { validateResponsePayload, findResponsesInText, findPdfPayloadInText } from './transport.js';
-import { parseStudentCode, codesEqual } from './codes.js';
+import { parseStudentCode, teacherCodesMatch, studentCodesMatch } from './codes.js';
 
 const NOT_FOUND = 'Keine ParentsDay-Rückmeldung gefunden.';
+const TOO_BIG = 'Die Datei ist zu groß – das ist keine Rückmelde-PDF.';
 
 /** Meldungen, wenn eine andere ParentsDay-Datei statt einer Rückmeldung hochgeladen wurde. */
 const OTHER_TYPES = {
@@ -119,6 +121,8 @@ function payloadsFromContainer(bytes) {
 
 /** Liest eine einzelne Datei. Gibt gefundene Rückmeldungen oder eine Fehlermeldung zurück. */
 async function readOneFile(file) {
+  // Große Dateien (z. B. ein versehentlich hineingezogenes Video) gar nicht erst einlesen – das legte die Seite lahm.
+  if (Number(file?.size) > MAX_RESPONSE_FILE_BYTES) return { message: TOO_BIG };
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   if (isPdfFile(file, bytes)) {
@@ -199,7 +203,8 @@ export function applyResponses(state, payloads, options = {}) {
       skip(name, payload.classId, 'Ungültiger Code');
       continue;
     }
-    if (!codesEqual(parsed.teacherCode, state?.teacher?.teacherCode)) {
+    // Anfangsbuchstaben tolerant: abgetipptes „L“ statt „Ł“ oder „l“ statt „I“ gehört trotzdem zu dieser Lehrkraft.
+    if (!teacherCodesMatch(parsed.teacherCode, state?.teacher?.teacherCode)) {
       skip(name, parsed.classId, 'Gehört zu einer anderen Lehrkraft');
       continue;
     }
@@ -210,7 +215,7 @@ export function applyResponses(state, payloads, options = {}) {
       continue;
     }
     const students = Array.isArray(cls.students) ? cls.students : [];
-    const studentIndex = students.findIndex((s) => s.code && codesEqual(s.code, payload.code));
+    const studentIndex = students.findIndex((s) => s.code && studentCodesMatch(s.code, payload.code));
     const student = students[studentIndex];
     if (!student) {
       skip(name, cls.id, `Kein Kind mit diesem Code in Klasse ${cls.id}`);

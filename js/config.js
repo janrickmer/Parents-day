@@ -1,7 +1,7 @@
 // Zentrale Einstellungen für ParentsDay.
 
 /** Öffentliche Adresse der Seite. Wird in Elternbriefe und QR-Codes gedruckt. */
-export const PUBLIC_URL = 'https://parents-day.janrickmer.de';
+export const PUBLIC_URL = 'https://parentsday.janrickmer.de';
 
 /** Anzeigename – immer mit großem „D“. */
 export const APP_NAME = 'ParentsDay';

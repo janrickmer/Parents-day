@@ -41,3 +41,13 @@ test('Tagesende 24:00 bleibt 24:00', () => {
   assert.equal(fromMinutes(1440), '24:00');
   assert.deepEqual(slotsToRanges([1430], 10), [['23:50', '24:00']]);
 });
+
+test('Verfügbarkeit aus fremden Daten prüfen', async () => {
+  const { cleanAvailability, isValidTime } = await import('../../js/core/time.js');
+  assert.ok(isValidTime('24:00'));
+  assert.ok(!isValidTime('24:30'));
+  assert.ok(!isValidTime(840));
+  assert.deepEqual(cleanAvailability({ '2026-11-12': { length: 1 } }), {});
+  assert.deepEqual(cleanAvailability(null), {});
+  assert.deepEqual(cleanAvailability({ kaputt: [['14:00', '15:00']], '2026-11-12': [['14:00', '15:00'], ['16:00']] }), { '2026-11-12': [['14:00', '15:00']] });
+});

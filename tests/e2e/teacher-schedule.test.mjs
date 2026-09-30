@@ -4,6 +4,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { startServer, launch, captureDownload, pdfPayload, pdfPageCount, seedTeacher, sampleState, SAMPLE_TEACHER } from './helpers.mjs';
@@ -321,7 +322,9 @@ test('Terminieren: Ziehen, Farben, Dauer, Verschieben, Entfernen, Überschneidun
     assert.equal(payload.type, 'appointments');
     assert.equal(payload.classId, '5a');
     assert.equal(payload.count, 2);
-    await page.getByText('Termine gespeichert – die PDF-Datei wurde heruntergeladen.').waitFor();
+    // Die Meldung steht auf der Seite (kein doppelter Hinweis als Toast)
+    await page.locator('.sched-messages .alert-success', { hasText: 'Termine gespeichert.' }).waitFor();
+    assert.equal(await page.locator('.toast', { hasText: 'Termine gespeichert' }).count(), 0);
     assert.equal(popups.length, 1, 'Drucken öffnet einen neuen Tab');
     await page.locator(`${tid('schedule-finalize')}:not([disabled])`).waitFor();
 
@@ -333,7 +336,8 @@ test('Terminieren: Ziehen, Farben, Dauer, Verschieben, Entfernen, Überschneidun
       const [first, second, last] = parsed.pages;
       // Seite 1: Can Yilmaz (12.11., 14:30) vor Ela Özdemir (13.11., 16:00)
       assert.match(first, /Ihr Gesprächstermin zum Elternsprechtag/);
-      assert.match(first, /Liebe Eltern von Can Yilmaz,/);
+      // Dieselbe Anrede wie im Elternbrief
+      assert.match(first, /Liebe Eltern und Erziehungsberechtigte von Can Yilmaz,/);
       assert.match(first, /Can Yilmaz \(Klasse 5a\)/);
       assert.match(first, /Donnerstag, 12\.11\.2026/);
       assert.match(first, /14:30–15:00 Uhr \(30 Minuten\)/);
@@ -341,7 +345,7 @@ test('Terminieren: Ziehen, Farben, Dauer, Verschieben, Entfernen, Überschneidun
       assert.match(first, /Anna Meier/);
       assert.match(first, /Bei spontanen Absagen oder Anfragen melden Sie sich gerne per E-Mail bei mir:/);
       assert.match(first, /anna\.meier@schule\.example/);
-      assert.match(second, /Liebe Eltern von Ela Özdemir,/);
+      assert.match(second, /Liebe Eltern und Erziehungsberechtigte von Ela Özdemir,/);
       assert.match(second, /Freitag, 13\.11\.2026/);
       assert.match(second, /16:00–16:10 Uhr \(10 Minuten\)/);
       // Letzte Seite: Übersicht aller Klassen, sortiert nach Zeit
@@ -381,7 +385,7 @@ test('Terminieren: Hinweise ohne Codes, ohne Termine und ohne Elternsprechtag', 
 
     // Codes noch nicht erzeugt
     await page.goto(`${server.url}#/lehrkraft/klasse/6c/terminieren`);
-    await page.getByText('Bitte zuerst in der Klasse die Codes erzeugen').waitFor();
+    await page.getByText('Bitte erzeugen Sie zuerst in der Klasse die Codes').waitFor();
     assert.equal(await page.getAttribute('.sched-page .btn-primary', 'href'), '#/lehrkraft/klasse/6c');
     assert.match(await page.textContent('.sched-page .alert'), /Tragen Sie dazu alle Lernenden ein/);
     await page.goto(`${server.url}#/lehrkraft/klasse/6d/terminieren`);
@@ -611,6 +615,143 @@ test('Terminieren: Popup-Blocker, Doppelklick und lange Übersicht im PDF', asyn
     await captureDownload(page, () => page.click(tid('schedule-finalize')));
     await page.getByText('Öffnen Sie die Datei zum Drucken aus Ihrem Download-Ordner.', { exact: false }).waitFor();
     assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+/** Für jeden Terminblock: sichtbare Dauer (lang oder kurz) und ob sie ganz im Block steht. */
+function durationVisibility(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('.sched-appt[data-student]')].map((block) => {
+      const label = block.querySelector('.sched-appt-label').getBoundingClientRect();
+      const dur = [...block.querySelectorAll('.sched-dur-long, .sched-dur-short')].find((el) => el.getClientRects().length > 0);
+      const r = dur?.getBoundingClientRect();
+      const name = block.querySelector('.sched-appt-name');
+      return {
+        id: block.dataset.student,
+        text: dur?.textContent || '',
+        inside: Boolean(r && r.width > 8 && r.left >= label.left - 0.5 && r.right <= label.right + 0.5),
+        nameCut: name.scrollWidth > name.clientWidth + 1,
+      };
+    }),
+  );
+}
+
+test('Terminblöcke: die Dauer in Klammern bleibt auch bei langen Namen sichtbar', async () => {
+  const longNames = [
+    ['Anna-Katharina', 'Schmidt-Müller'],
+    ['Maximilian', 'Hohenzollern-Sigmaringen'],
+    ['Charlotte', 'Oppenheimer'],
+    ['Ben', 'Fischer-Hoffmann'],
+    ['Alexander', 'Wagner'],
+  ];
+  const state = sampleState({
+    classes: [
+      {
+        id: '5a',
+        grade: 5,
+        letter: 'a',
+        codesGenerated: true,
+        students: longNames.map(([f, l], i) => kid(5, 'a', `k${i}`, f, l, { response: response({ [DAY1]: [['14:00', '18:00']] }), appointment: { date: i % 2 ? DAY2 : DAY1, start: i % 2 ? `15:${i}0` : `14:${i}0`, duration: 10 } })),
+      },
+    ],
+  });
+  state.event.days.push({ date: '2026-11-16', start: '14:00', end: '16:00' });
+  for (const [viewport, opts] of [
+    [{ width: 1440, height: 900 }, {}],
+    [{ width: 1280, height: 800 }, {}],
+    [{ width: 1024, height: 768 }, { hasTouch: true }],
+    [{ width: 768, height: 1024 }, { hasTouch: true }],
+    [{ width: 390, height: 844 }, { hasTouch: true, isMobile: true }],
+  ]) {
+    const { browser, page, errors } = await launch({ viewport, ...opts });
+    try {
+      await seedTeacher(page, server.url, state);
+      await page.goto(`${server.url}#/lehrkraft/klasse/5a/terminieren`);
+      await page.locator(tid('appointment-k1')).waitFor();
+      const blocks = await durationVisibility(page);
+      assert.equal(blocks.length, longNames.length);
+      for (const b of blocks) {
+        assert.ok(b.inside, `${viewport.width}px: Dauer von ${b.id} abgeschnitten`);
+        assert.match(b.text, /^\(10( Min\.|′)\)$/, `${viewport.width}px: ${b.id}`);
+      }
+      // Am großen Bildschirm steht die ausführliche Form, gekürzt wird höchstens der Name
+      if (viewport.width >= 1280) assert.ok(blocks.every((b) => b.text === '(10 Min.)'));
+      if (viewport.width === 390) assert.ok(blocks.some((b) => b.nameCut), 'auf dem Smartphone wird der Name gekürzt, nicht die Dauer');
+      await shot(page, `schedule-dauer-${viewport.width}`, { fullPage: false });
+      assert.deepEqual(errors, []);
+    } finally {
+      await browser.close();
+    }
+  }
+});
+
+test('Termin-PDF: Die letzte Seite ist die Übersichtstabelle – nie nur die Summenzeile', async (t) => {
+  const { browser, page, errors } = await launch();
+  try {
+    await seedTeacher(page, server.url, sampleState());
+    const pad = (n) => String(n).padStart(2, '0');
+    const at = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+    const cases = [
+      { count: 20, days: 2, open: 0 },
+      { count: 22, days: 1, open: 0 },
+      { count: 28, days: 2, open: 2 },
+      { count: 30, days: 1, open: 0 },
+      { count: 40, days: 1, open: 4 },
+    ];
+    for (const { count, days, open } of cases) {
+      const students = Array.from({ length: count + open }, (_, i) =>
+        kid(5, 'a', `x${i}`, `Kind${i}`, `Nachname${i}`, {
+          appointment: i < count ? { date: days === 2 && i % 2 ? DAY2 : DAY1, start: at(840 + Math.floor(days === 2 ? i / 2 : i) * 10), duration: 10 } : null,
+        }),
+      );
+      const state = sampleState({ classes: [{ id: '5a', grade: 5, letter: 'a', codesGenerated: true, students }] });
+      state.event.days = [
+        { date: DAY1, start: '14:00', end: '22:00' },
+        { date: DAY2, start: '14:00', end: '22:00' },
+      ];
+      const data = await page.evaluate(async (s) => {
+        const { createAppointmentsPdf } = await import('./js/pdf/appointments-pdf.js');
+        const { doc } = await createAppointmentsPdf(s, '5a');
+        return doc.output('datauristring').split(',')[1];
+      }, state);
+      const file = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'pd-termine-')), `termine-${count}.pdf`);
+      await fs.writeFile(file, Buffer.from(data, 'base64'));
+      const parsed = pdfText(file);
+      if (!parsed) {
+        t.diagnostic('python3/pymupdf nicht verfügbar – Seiteninhalt nicht geprüft');
+        return;
+      }
+      const last = parsed.pages.at(-1);
+      const rowsOnLast = (last.match(/10 Min\./g) || []).length;
+      assert.ok(rowsOnLast >= 2, `${count} Termine: letzte Seite enthält nur ${rowsOnLast} Tabellenzeilen`);
+      assert.match(last, new RegExp(`Insgesamt ${count} Termine\\.`));
+      if (open) assert.match(last, /Noch ohne Termin in Klasse 5a:/);
+      // Eine übliche Klasse (bis 30 Termine an einem Tag) passt auf eine Übersichtsseite
+      if (count <= 30 && days === 1) assert.equal(parsed.pages.length, count + 1, `${count} Termine: Übersicht auf einer Seite`);
+    }
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Seite lässt sich wegen fehlender Verbindung nicht laden: verständliche Meldung und „Seite neu laden“', async () => {
+  const { browser, page } = await launch();
+  try {
+    await page.route('**/js/views/teacher-schedule.js', (route) => route.abort('internetdisconnected'));
+    await seedTeacher(page, server.url, scheduleState());
+    await page.goto(`${server.url}#/lehrkraft/klasse/5a/terminieren`);
+    const alert = page.locator('main .alert-error');
+    await alert.waitFor();
+    const text = await alert.textContent();
+    assert.match(text, /Die Seite konnte nicht geladen werden\. Bitte prüfen Sie Ihre Internetverbindung/);
+    assert.doesNotMatch(text, /Failed|fetch|module|http/i);
+    // Wieder online: „Seite neu laden“ hilft
+    await page.unroute('**/js/views/teacher-schedule.js');
+    await page.click('[data-action="reload"]');
+    await page.locator(tid('schedule-finalize')).waitFor();
   } finally {
     await browser.close();
   }

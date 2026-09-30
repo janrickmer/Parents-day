@@ -11,6 +11,7 @@ Dieses Dokument enthält die ursprüngliche Aufgabenbeschreibung und die dazu ge
 | Umlaute im Zahlencode | **Umschreiben**: ä→ae, ö→oe, ü→ue, ß→ss. Akzente werden entfernt (é→e, ş→s, ł→l). Alle anderen Zeichen wie Bindestrich, Leerzeichen und Apostroph werden ignoriert. Groß- und Kleinschreibung spielt keine Rolle. |
 | Reihenfolge im Zahlencode | Erst der Vorname, dann der Nachname. Beispiel: Anna Beck → 114141 + 25311 = 11414125311. |
 | Tippfehler in der Beschreibung | „Einfuhrzeit“ bedeutet **Endzeit**. Der Knopf heißt „Termine festlegen, speichern und **drucken**“. |
+| Adresse der Seite | **https://parentsday.janrickmer.de** (ohne Bindestrich). So ist der DNS-Eintrag angelegt. Diese Adresse steht in Elternbriefen und QR-Codes und ersetzt die Adresse `parents-day.janrickmer.de` aus der Beschreibung. |
 | Dateiname Zwischenspeicher | `Zwischenspeicher vom TT.MM.JJJJ um hh꞉mm für ParentsDay.json`. Ein echter Doppelpunkt ist in Dateinamen unter Windows/macOS verboten. Deshalb steht dort das gleich aussehende Zeichen „꞉“ (U+A789). |
 
 ### Rechenbeispiele

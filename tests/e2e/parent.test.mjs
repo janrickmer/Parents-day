@@ -108,8 +108,10 @@ test('Eltern (Smartphone): Link aus dem Elternbrief → Anmeldung → Zeiten mar
     assert.equal(await page.getAttribute(tid('parent-code'), 'aria-invalid'), 'true');
     await fillLogin(page, { ...ANNA_BECK, code: '5aB16595316960M11414125311' });
     await page.tap(tid('parent-login'));
-    await page.locator('.parent-login-error', { hasText: 'anderen Lehrkraft' }).waitFor();
+    await page.locator('.parent-login-error', { hasText: 'anderen Elternbrief' }).waitFor();
     assert.equal(await page.evaluate(() => location.hash), '#/eltern');
+    // Code aus einem anderen Elternbrief: der Termin-Schlüssel kann jetzt eingegeben werden
+    assert.equal(await page.locator(tid('parent-key')).count(), 1);
     await shot(page, 'mobil-2-anmeldung-fehler');
 
     // Richtiger Code (mit Leerzeichen und in Kleinbuchstaben getippt) → Zeiten
@@ -240,7 +242,8 @@ test('Eltern (Desktop): ohne Link mit Termin-Schlüssel anmelden, Ziehen mit der
     };
   });
   try {
-    const key = encodeEventKey(sampleState().event);
+    const owner = { teacherCode: SAMPLE_TEACHER.teacherCode, classId: '5a' };
+    const key = encodeEventKey(sampleState().event, owner);
     assert.ok(key.length > 0);
     await page.goto(`${server.url}#/eltern`);
     await page.waitForSelector(tid('parent-key'));
@@ -253,11 +256,15 @@ test('Eltern (Desktop): ohne Link mit Termin-Schlüssel anmelden, Ziehen mit der
     await fillLogin(page, ANNA_BECK);
     const raw = key.replace(/-/g, '');
     const wrongKey = raw.slice(0, 6) + (raw[6] === '7' ? '8' : '7') + raw.slice(7);
-    assert.throws(() => decodeEventKey(wrongKey));
+    assert.throws(() => decodeEventKey(wrongKey, owner));
     await page.fill(tid('parent-key'), wrongKey);
     await page.click(tid('parent-login'));
-    await page.locator('.parent-login-error', { hasText: 'Termin-Schlüssel ist ungültig' }).waitFor();
+    await page.locator('.parent-login-error', { hasText: 'Termin-Schlüssel und Code passen nicht zusammen' }).waitFor();
     assert.equal(await page.getAttribute(tid('parent-key'), 'aria-invalid'), 'true');
+    // Zu kurzer Schlüssel
+    await page.fill(tid('parent-key'), raw.slice(0, 8));
+    await page.click(tid('parent-login'));
+    await page.locator('.parent-login-error', { hasText: 'Termin-Schlüssel ist ungültig' }).waitFor();
 
     // Richtiger Schlüssel (klein geschrieben, ohne Bindestriche)
     await page.fill(tid('parent-key'), key.replace(/-/g, '').toLowerCase());
@@ -523,6 +530,244 @@ test('Eltern (Smartphone): lange Namen mit Umlauten, 5-Minuten-Raster, sechs Tag
     await page.locator('.alert-warning', { hasText: 'nach dem Absenden geändert' }).waitFor();
 
     assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+// Zweite Lehrkraft für Geschwisterkinder: Bernd Schulz, 19.11. mit 15-Minuten-Raster
+const SCHULZ = { firstName: 'Bernd', lastName: 'Schulz', birthDate: '1982-02-02', email: 'bernd.schulz@schule.example' };
+async function schulzState(page) {
+  if (!page.url().startsWith(server.url)) await page.goto(server.url);
+  const codes = await page.evaluate((t) => import('./js/core/codes.js').then((m) => ({ registrationCode: m.registrationCode(t.firstName, t.lastName, t.birthDate), teacherCode: m.teacherCode(t.firstName, t.lastName, t.birthDate) })), SCHULZ);
+  return sampleState({ teacher: { ...SCHULZ, ...codes }, event: { schoolAddress: 'Realschule Nord', slotMinutes: 15, days: [{ date: '2026-11-19', start: '15:00', end: '17:00' }] } });
+}
+function childCode(page, grade, letter, tCode, firstName, lastName) {
+  return page.evaluate((a) => import('./js/core/codes.js').then((m) => m.studentCode(...a)), [grade, letter, tCode, firstName, lastName]);
+}
+
+test('Eltern: Geschwister in zwei Tabs – jede Rückmeldung geht an die richtige Lehrkraft', async () => {
+  const { browser, context, page, errors } = await launch(MOBILE);
+  try {
+    const meier = sampleState();
+    const schulz = await schulzState(page);
+    const lena = { firstName: 'Lena', lastName: 'Beck', code: await childCode(page, 5, 'a', SAMPLE_TEACHER.teacherCode, 'Lena', 'Beck') };
+    const tom = { firstName: 'Tom', lastName: 'Beck', code: await childCode(page, 7, 'b', schulz.teacher.teacherCode, 'Tom', 'Beck') };
+    const meierUrl = await letterUrl(page, meier, '5a');
+    const schulzUrl = await letterUrl(page, schulz, '7b');
+
+    // Tab 1: Lena (Frau Meier)
+    await page.goto(meierUrl);
+    await fillLogin(page, lena);
+    await page.tap(tid('parent-login'));
+    await page.waitForSelector(slot('2026-11-12', '14:00'));
+    await page.tap(slot('2026-11-12', '14:00'));
+
+    // Tab 2: Tom (Herr Schulz), eigener QR-Code
+    const tab2 = await context.newPage();
+    tab2.on('pageerror', (err) => errors.push(`Tab 2: ${err.message}`));
+    await tab2.goto(schulzUrl);
+    await fillLogin(tab2, tom);
+    await tab2.tap(tid('parent-login'));
+    await tab2.waitForSelector(slot('2026-11-19', '15:00'));
+
+    // Weiter in Tab 1: Lena absenden
+    await page.tap(slot('2026-11-12', '14:10'));
+    const dl = await captureDownload(page, () => page.tap(tid('parent-submit')));
+    assert.equal(pdfPayload(dl.buffer).code, lena.code);
+    await waitForHash(page, '#/eltern/fertig');
+    const mail = decodedMailto(await page.getAttribute(tid('parent-mailto'), 'href'));
+    assert.equal(mail.recipient, SAMPLE_TEACHER.email);
+    assert.match(mail.subject, /Lena Beck \(Klasse 5a\)/);
+    assert.match(mail.body, /Guten Tag Anna Meier,/);
+    assert.match(mail.body, /Donnerstag, 12\.11\.2026: 14:00–14:20 Uhr/);
+    assert.match(await page.textContent('main'), /Es fehlt nur noch die E-Mail an Anna Meier/);
+
+    // Tab 2 nach dem Neuladen: Tom ist unverändert (nichts abgesendet, nichts markiert)
+    await tab2.reload();
+    await tab2.waitForSelector(slot('2026-11-19', '15:00'));
+    assert.match(await tab2.textContent('.page-header'), /Tom Beck, Klasse 7b/);
+    assert.equal(await tab2.locator('[aria-pressed="true"]').count(), 0);
+    assert.equal(await tab2.locator('main .alert-success').count(), 0, 'Für Tom wurde nichts abgesendet');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Eltern mit Termin-Schlüssel: anderes Kind, andere Lehrkraft, Tippfehler im Lehrkräftecode, Ł statt L', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    const meier = sampleState();
+    const schulz = await schulzState(page);
+    const meierKey = encodeEventKey(meier.event, { teacherCode: SAMPLE_TEACHER.teacherCode, classId: '5a' });
+    const schulzKey = encodeEventKey(schulz.event, { teacherCode: schulz.teacher.teacherCode, classId: '7b' });
+    const lena = { firstName: 'Lena', lastName: 'Beck', code: await childCode(page, 5, 'a', SAMPLE_TEACHER.teacherCode, 'Lena', 'Beck') };
+    const tom = { firstName: 'Tom', lastName: 'Beck', code: await childCode(page, 7, 'b', schulz.teacher.teacherCode, 'Tom', 'Beck') };
+
+    // Zahlendreher im Lehrkräftecode des Kindes: der Schlüssel passt nicht → verständliche Meldung
+    await page.goto(`${server.url}#/eltern`);
+    await page.waitForSelector(tid('parent-key'));
+    await fillLogin(page, { ...lena, code: lena.code.replace('A16595316960M', 'A16595316690M') });
+    await page.fill(tid('parent-key'), meierKey);
+    await page.click(tid('parent-login'));
+    await page.locator('.parent-login-error', { hasText: 'Termin-Schlüssel und Code passen nicht zusammen' }).waitFor();
+    assert.match(await page.textContent('.parent-login-error'), /direkt nach „5a“/);
+    assert.equal(await page.getAttribute(tid('parent-code'), 'aria-invalid'), 'true');
+
+    // Richtig: Lena meldet sich an, sendet ab und trägt die Adresse von Frau Meier ein
+    await fillLogin(page, lena);
+    await page.click(tid('parent-login'));
+    await page.waitForSelector(slot('2026-11-12', '14:00'));
+    await page.click(slot('2026-11-12', '14:00'));
+    await captureDownload(page, () => page.click(tid('parent-submit')));
+    await waitForHash(page, '#/eltern/fertig');
+    await page.fill(tid('parent-teacher-email'), SAMPLE_TEACHER.email);
+
+    // „Anderes Kind“: Tom gehört zu Herrn Schulz → Termin-Schlüssel wird wieder abgefragt
+    await page.goto(`${server.url}#/eltern`);
+    await page.click(tid('parent-switch'));
+    await page.locator('.modal').getByRole('button', { name: 'Ja, abmelden' }).click();
+    await page.waitForSelector(tid('parent-firstname'));
+    assert.equal(await page.locator(tid('parent-key')).count(), 0, 'für ein Kind aus demselben Brief nicht nötig');
+    await fillLogin(page, tom);
+    await page.click(tid('parent-login'));
+    await page.locator('.parent-login-error', { hasText: 'anderen Elternbrief' }).waitFor();
+    assert.equal(await page.locator(tid('parent-key')).count(), 1);
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset.testid), 'parent-key');
+    // Frau Meiers Schlüssel passt nicht zu Toms Code
+    await page.fill(tid('parent-key'), meierKey);
+    await page.click(tid('parent-login'));
+    await page.locator('.parent-login-error', { hasText: 'passen nicht zusammen' }).waitFor();
+    await page.fill(tid('parent-key'), schulzKey);
+    await page.click(tid('parent-login'));
+    await page.waitForSelector(slot('2026-11-19', '15:00'));
+    assert.equal(await page.locator('[data-testid^="slot-2026-11-12-"]').count(), 0, 'nicht die Tage von Frau Meier');
+    await page.click(slot('2026-11-19', '15:15'));
+    const dl = await captureDownload(page, () => page.click(tid('parent-submit')));
+    const payload = pdfPayload(dl.buffer);
+    assert.equal(payload.slotMinutes, 15);
+    assert.deepEqual(Object.keys(payload.availability), ['2026-11-19']);
+    await waitForHash(page, '#/eltern/fertig');
+    // Die Adresse von Frau Meier wird nicht für Toms Lehrkraft vorgeschlagen
+    assert.equal(await page.inputValue(tid('parent-teacher-email')), '');
+    assert.ok((await page.getAttribute(tid('parent-mailto'), 'href')).startsWith('mailto:?subject='));
+
+    // Lehrkraft mit „Ł“ und „Ż“: im Brief abgetippt als „L“ und „Z“
+    const zak = { firstName: 'Łukasz', lastName: 'Żak', birthDate: '1987-06-24' };
+    const zakCode = await page.evaluate((t) => import('./js/core/codes.js').then((m) => m.teacherCode(t.firstName, t.lastName, t.birthDate)), zak);
+    const zakEvent = { slotMinutes: 10, days: [{ date: '2026-11-20', start: '14:00', end: '15:00' }] };
+    const zakKey = encodeEventKey(zakEvent, { teacherCode: zakCode, classId: '7b' });
+    const mia = await childCode(page, 7, 'b', zakCode, 'Mia', 'Beck');
+    await page.goto(`${server.url}#/eltern`);
+    await page.click(tid('parent-switch'));
+    await page.locator('.modal').getByRole('button', { name: 'Ja, abmelden' }).click();
+    await page.click(tid('parent-other-key'));
+    await page.waitForSelector(tid('parent-key'));
+    await fillLogin(page, { firstName: 'Mia', lastName: 'Beck', code: mia.replace('Ł', 'L').replace('Ż', 'Z') });
+    await page.fill(tid('parent-key'), zakKey);
+    await page.click(tid('parent-login'));
+    await page.waitForSelector(slot('2026-11-20', '14:00'));
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Eltern: Nach einem QR-Link lässt sich ein Geschwisterkind mit dem Termin-Schlüssel anmelden', async () => {
+  const { browser, page, errors } = await launch(MOBILE);
+  try {
+    const meier = sampleState();
+    const schulz = await schulzState(page);
+    const schulzKey = encodeEventKey(schulz.event, { teacherCode: schulz.teacher.teacherCode, classId: '7b' });
+    const tom = { firstName: 'Tom', lastName: 'Beck', code: await childCode(page, 7, 'b', schulz.teacher.teacherCode, 'Tom', 'Beck') };
+    await page.goto(await letterUrl(page, meier, '5a'));
+    await fillLogin(page, ANNA_BECK);
+    await page.tap(tid('parent-login'));
+    await page.waitForSelector(slot('2026-11-12', '14:00'));
+    // Wie im Brief beschrieben: Startseite → Zugang für Eltern → Anderes Kind
+    await page.goto(`${server.url}#/`);
+    await page.tap(tid('start-parent'));
+    await page.tap(tid('parent-switch'));
+    await page.waitForSelector(tid('parent-other-key'));
+    await fillLogin(page, tom);
+    await page.tap(tid('parent-login'));
+    await page.locator('.parent-login-error', { hasText: 'anderen Elternbrief' }).waitFor();
+    await page.fill(tid('parent-key'), schulzKey);
+    await page.tap(tid('parent-login'));
+    await page.waitForSelector(slot('2026-11-19', '15:00'));
+    const stored = await parentState(page);
+    assert.equal(stored.event.source, 'key');
+    assert.equal(stored.event.classId, '7b');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Eltern: veränderter Link – keine zusätzlichen Empfänger, keine riesigen Termindaten', async () => {
+  const { browser, page, errors } = await launch(MOBILE);
+  try {
+    const encode = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    const base = { v: 1, n: 'Anna Meier', t: SAMPLE_TEACHER.teacherCode, a: 'Schule', s: 10, d: [['2026-11-12', '14:00', '15:00']], k: '5a' };
+    // Zu viele Tage, 1-Minuten-Raster, doppelte Tage, Uhrzeiten außerhalb des 5-Minuten-Rasters
+    for (const bad of [
+      { ...base, d: Array.from({ length: 9 }, (_, i) => [`2026-11-${10 + i}`, '14:00', '15:00']) },
+      { ...base, s: 1 },
+      { ...base, s: 7 },
+      { ...base, d: [['2026-11-12', '14:00', '15:00'], ['2026-11-12', '16:00', '17:00']] },
+      { ...base, d: [['2026-11-12', '14:03', '15:00']] },
+    ]) {
+      await page.goto(`${server.url}#/`);
+      await page.goto(`${server.url}#/eltern?e=${encode(bad)}`);
+      await page.locator('.alert-error', { hasText: 'Der Link aus dem Elternbrief ist unvollständig oder beschädigt.' }).waitFor();
+      assert.equal((await parentState(page))?.event ?? null, null);
+    }
+
+    // Zusätzlicher Empfänger im Link: Adresse wird verworfen, die Eltern tippen sie selbst ein
+    for (const m of ['lehrer@schule.de,spion@evil.example', 'lehrer@schule.de%2Cspion@evil.example', 'lehrer@schule.de\r\nBcc:spion@evil.example']) {
+      await page.evaluate(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+      });
+      await page.goto(`${server.url}#/`);
+      await page.goto(`${server.url}#/eltern?e=${encode({ ...base, m, n: 'x'.repeat(5000), a: 'Zeile\n'.repeat(50) })}`);
+      await page.waitForSelector(tid('parent-firstname'));
+      assert.ok((await page.textContent('.parent-event-title')).length < 250, 'Name gekürzt');
+      await fillLogin(page, ANNA_BECK);
+      await page.tap(tid('parent-login'));
+      await page.tap(slot('2026-11-12', '14:00'));
+      await captureDownload(page, () => page.tap(tid('parent-submit')));
+      await waitForHash(page, '#/eltern/fertig');
+      await page.waitForSelector(tid('parent-teacher-email'));
+      assert.ok((await page.getAttribute(tid('parent-mailto'), 'href')).startsWith('mailto:?subject='), m);
+      assert.doesNotMatch(await page.textContent('main'), /spion/);
+    }
+    // Auch eine formal gültige, aber kodierte Adresse ergibt nur einen Empfänger
+    await page.fill(tid('parent-teacher-email'), 'spion%40evil.example%2Clehrer@schule.de');
+    const href = await page.getAttribute(tid('parent-mailto'), 'href');
+    const recipients = decodeURIComponent(href.slice(7, href.indexOf('?'))).split(/[,;]/);
+    assert.deepEqual(recipients, ['spion%40evil.example%2Clehrer@schule.de']);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Eltern: Schrift für das PDF nicht erreichbar → deutsche Meldung mit Hinweis auf die Internetverbindung', async () => {
+  const { browser, page } = await launch(MOBILE);
+  try {
+    await page.route('**/fonts/**', (route) => route.abort('internetdisconnected'));
+    await page.goto(await letterUrl(page, sampleState(), '5a'));
+    await fillLogin(page, ANNA_BECK);
+    await page.tap(tid('parent-login'));
+    await page.tap(slot('2026-11-12', '14:00'));
+    await page.tap(tid('parent-submit'));
+    const alert = page.locator('.parent-submit-card .alert-error');
+    await alert.waitFor();
+    const text = await alert.textContent();
+    assert.match(text, /Die PDF-Datei konnte nicht erstellt werden\. Die Schrift für PDFs konnte nicht geladen werden\. Bitte prüfen Sie Ihre Internetverbindung/);
+    assert.doesNotMatch(text, /Failed to fetch/);
   } finally {
     await browser.close();
   }

@@ -233,3 +233,23 @@ test('Andere Dateiformate (z. B. aus Outlook gezogene .msg-Mail): eingebettete P
   assert.deepEqual(payloads.map((p) => p.firstName), ['Anna', 'Ben']);
   assert.deepEqual(errors, [{ fileName: 'leer.msg', message: 'Keine ParentsDay-Rückmeldung gefunden.' }]);
 });
+
+test('Zu große Dateien werden nicht eingelesen', async () => {
+  const huge = { name: 'Urlaub.mp4', size: 300 * 1024 * 1024, arrayBuffer: () => Promise.reject(new Error('darf nicht gelesen werden')) };
+  const { payloads, errors } = await readResponsesFromFiles([huge, new File([`${encodeResponseText(response('Anna', 'Beck', '5a'))}`], 'mail.txt')]);
+  assert.equal(payloads.length, 1);
+  assert.deepEqual(errors, [{ fileName: 'Urlaub.mp4', message: 'Die Datei ist zu groß – das ist keine Rückmelde-PDF.' }]);
+});
+
+test('Abgetippte Anfangsbuchstaben (L statt Ł, l statt I) werden trotzdem zugeordnet', async () => {
+  const { teacherCode } = await import('../../js/core/codes.js');
+  const tc = teacherCode('Łukasz', 'Żak', '1987-06-24');
+  const state = makeState();
+  state.teacher = { ...state.teacher, firstName: 'Łukasz', lastName: 'Żak', teacherCode: tc };
+  state.classes[0].students = [{ ...student(5, 'a', 'Anna', 'Beck'), code: studentCode(5, 'a', tc, 'Anna', 'Beck') }];
+  const typed = studentCode(5, 'a', tc.replace('Ł', 'L').replace('Ż', 'Z'), 'Anna', 'Beck');
+  const { applied, skipped } = applyResponses(state, [response('Anna', 'Beck', '5a', { code: typed, teacherCode: tc.replace('Ł', 'L').replace('Ż', 'Z') })]);
+  assert.deepEqual(skipped, []);
+  assert.equal(applied.length, 1);
+  assert.ok(state.classes[0].students[0].response);
+});

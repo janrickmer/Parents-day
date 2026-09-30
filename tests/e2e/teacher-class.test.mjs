@@ -602,3 +602,133 @@ test('Schutz vor Doppelklicks, Rückgängig, Kopfzeile „Vorname | Nachname“,
     await browser.close();
   }
 });
+
+function namesOf(state, classId = '5a') {
+  return state.classes.find((c) => c.id === classId).students.map((s) => `${s.firstName} ${s.lastName}${s.response ? ' [Rückmeldung]' : ''}`);
+}
+
+test('Dieselbe Klasse in zwei Tabs: ergänzte Lernende und Rückmeldungen gehen nicht verloren', async () => {
+  const { browser, context, page, errors } = await launch();
+  try {
+    await seedTeacher(page, server.url, sampleState({ classes: [sampleClass()] }));
+    await page.goto(`${server.url}#/lehrkraft/klasse/5a`);
+    await page.waitForSelector(tid('student-row'));
+    // Zweiter Tab (dieselbe Anmeldung)
+    const tabB = await context.newPage();
+    tabB.on('pageerror', (err) => errors.push(`B: ${err.message}`));
+    await tabB.goto(server.url);
+    await tabB.evaluate((c) => sessionStorage.setItem('parentsday.session', c), TC);
+    await tabB.goto(`${server.url}#/lehrkraft/klasse/5a`);
+    await tabB.waitForSelector(tid('student-row'));
+    await tabB.click(tid('add-student'));
+    const rowB = tabB.locator(tid('student-row')).nth(3);
+    await rowB.locator(tid('student-lastname')).fill('Dorn');
+    await rowB.locator(tid('student-firstname')).fill('Clara');
+    await rowB.locator(tid('student-firstname')).press('Tab');
+    await waitForState(page, (s) => namesOf(s).includes('Clara Dorn'));
+
+    // Tab A (älterer Stand) ändert einen Namen: Clara bleibt erhalten und erscheint auch hier
+    await page.locator(tid('student-firstname')).nth(1).fill('Jörgen');
+    await page.locator(tid('student-firstname')).nth(1).press('Tab');
+    const state = await waitForState(page, (s) => namesOf(s).includes('Jörgen Müller'));
+    assert.deepEqual(namesOf(state), ['Anna Beck [Rückmeldung]', 'Jörgen Müller', 'Ela Özdemir', 'Clara Dorn']);
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="student-lastname"]')].some((el) => el.value === 'Dorn'));
+
+    // Löschen in Tab B wird in Tab A nicht wieder rückgängig gemacht
+    await tabB.reload();
+    await tabB.waitForSelector(tid('student-row'));
+    await tabB.locator(tid('student-row')).nth(2).locator('.tc-del').click();
+    await waitForState(page, (s) => !namesOf(s).includes('Ela Özdemir'));
+    await page.locator(tid('student-lastname')).first().fill('Becker');
+    await page.locator(tid('student-lastname')).first().press('Tab');
+    const after = await waitForState(page, (s) => namesOf(s).includes('Anna Becker [Rückmeldung]'));
+    assert.deepEqual(namesOf(after), ['Anna Becker [Rückmeldung]', 'Jörgen Müller', 'Clara Dorn']);
+
+    // Klasse in Tab B gelöscht → Tab A meldet das, statt still „gespeichert“ zu zeigen
+    await tabB.click(tid('delete-class'));
+    await tabB.locator('.modal').getByRole('button', { name: 'Klasse löschen' }).click();
+    await tabB.waitForURL(/#\/lehrkraft\/klassen$/);
+    await page.locator('.tc-feedback .alert-error', { hasText: 'wurde inzwischen gelöscht' }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Smartphone: Nach dem Erzeugen der Codes sind Meldung und nächster Knopf zu sehen', async () => {
+  const { browser, page, errors } = await launch({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try {
+    const students = Array.from({ length: 25 }, (_, i) => ({ id: `s${i}`, lastName: `Nachname${String.fromCharCode(65 + i)}`, firstName: `Kind${String.fromCharCode(65 + i)}`, code: '', response: null, appointment: null }));
+    await seedTeacher(page, server.url, sampleState({ classes: [sampleClass({ codesGenerated: false, students })] }));
+    await page.goto(`${server.url}#/lehrkraft/klasse/5a`);
+    await page.waitForSelector(tid('student-row'));
+    await page.locator(tid('primary-action')).scrollIntoViewIfNeeded();
+    await page.tap(tid('primary-action'));
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent.includes('Elternschreiben'), tid('primary-action'));
+    await page.waitForTimeout(900); // sanftes Scrollen
+    const inView = await page.evaluate(() => {
+      const visible = (el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.bottom <= window.innerHeight;
+      };
+      return { feedback: visible(document.querySelector('.tc-feedback')), button: visible(document.querySelector('[data-testid="primary-action"]')), focused: document.activeElement?.dataset.testid };
+    });
+    assert.deepEqual(inView, { feedback: true, button: true, focused: 'primary-action' });
+    // Keine doppelte Meldung als Toast
+    assert.equal(await page.locator('.toast', { hasText: 'Codes für' }).count(), 0);
+    assert.match(await page.textContent('.tc-feedback'), /Codes für 25 Lernende erzeugt\./);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Tablet hochkant: fokussierte Felder verschwinden nicht unter der Kopfzeile; lange Namen bleiben lesbar', async () => {
+  const { browser, page, errors } = await launch({ viewport: { width: 768, height: 1024 }, hasTouch: true });
+  try {
+    const students = Array.from({ length: 28 }, (_, i) => ({ id: `s${i}`, lastName: i === 3 ? 'Hohenzollern-Sigmaringen' : `Nachname${i}`, firstName: i === 3 ? 'Maximiliane-Theresia' : `Kind${i}`, code: '', response: null, appointment: null }));
+    for (const s of students) s.code = code5a(s.firstName, s.lastName);
+    await seedTeacher(page, server.url, sampleState({ classes: [sampleClass({ students })] }));
+    await page.goto(`${server.url}#/lehrkraft/klasse/5a`);
+    await page.waitForSelector(tid('student-row'));
+    await page.focus(tid('primary-action'));
+    const covered = [];
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press('Shift+Tab');
+      const info = await page.evaluate(() => {
+        const header = document.querySelector('.site-header').getBoundingClientRect();
+        const el = document.activeElement.getBoundingClientRect();
+        return { top: el.top, headerBottom: header.bottom, label: document.activeElement.getAttribute('aria-label') || document.activeElement.textContent.trim().slice(0, 30) };
+      });
+      if (info.top < info.headerBottom - 0.5) covered.push(`${info.label}: ${info.top.toFixed(0)} < ${info.headerBottom.toFixed(0)}`);
+    }
+    assert.deepEqual(covered, [], 'Fokus unter der Kopfzeile');
+    // Tablet quer: Namensfelder bleiben auch mit Code- und Verfügbarkeitsspalte breit genug für lange Namen
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const field = await page.locator(tid('student-lastname')).nth(3).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+    assert.ok(field.scroll <= field.client + 1, `„Hohenzollern-Sigmaringen“ abgeschnitten: ${JSON.stringify(field)}`);
+    const wrap = await page.locator('.tc-table-wrap').evaluate((el) => el.scrollWidth - el.clientWidth);
+    assert.ok(wrap <= 0, 'Tabelle passt ohne seitliches Scrollen');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Hinweise (Toasts) lassen sich schließen und blockieren keine Klicks daneben', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    await seedTeacher(page, server.url, sampleState({ classes: [sampleClass()] }));
+    await page.goto(`${server.url}#/lehrkraft/klasse/5a`);
+    await page.waitForSelector(tid('student-row'));
+    await paste(page.locator(tid('student-lastname')).first(), 'Beck\tAnna\nMüller\tJörg\n');
+    const toast = page.locator('.toast', { hasText: 'eingefügt' });
+    await toast.waitFor();
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.toast-host')).pointerEvents), 'none');
+    await toast.getByRole('button', { name: 'Hinweis schließen' }).click();
+    await toast.waitFor({ state: 'detached' });
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});

@@ -5,7 +5,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { startServer, launch, captureDownload, pdfPayload, pdfPageCount, seedTeacher, sampleState, SAMPLE_TEACHER } from './helpers.mjs';
+import { startServer, launch, captureDownload, pdfPayload, pdfPageCount, seedTeacher, sampleState, SAMPLE_TEACHER, OUTPUT as OUTPUT_DIR } from './helpers.mjs';
 import { registrationCode, teacherCode } from '../../js/core/codes.js';
 import { pdfPayloadString } from '../../js/core/transport.js';
 
@@ -165,7 +165,8 @@ test('Registrierung: Startseite → Registrieren → PDF → Codes → Weiter', 
     const state = await storedState(page, 'A16595316960M');
     assert.deepEqual(state.teacher, { ...ANNA });
     assert.equal(state.event, null);
-    assert.equal(await sessionCode(page), null, 'Sitzung erst mit „Weiter“');
+    // Gleich angemeldet: Neuladen oder „Zurück“ führt nicht zu einem leeren Formular ohne Anmeldung
+    assert.equal(await sessionCode(page), 'A16595316960M');
     await shot(page, 'desktop-3-registrierung-abgeschlossen');
 
     // PDF erneut herunterladen
@@ -199,7 +200,7 @@ test('Anmeldung per Registrierungs-PDF und per Eingabe, Fehlerfälle', async () 
     await waitForHash(page, '#/lehrkraft/elternsprechtag');
     await waitForToast(page, 'Willkommen, Anna Meier!');
     assert.equal(await sessionCode(page), 'A16595316960M');
-    assert.equal(await page.locator('.toast', { hasText: 'noch keine Daten gespeichert' }).count(), 0);
+    assert.equal(await page.locator('main', { hasText: 'noch keine Daten gespeichert' }).count(), 0);
 
     // 2. PDF-Upload auf einem „leeren“ Gerät → Zustand wird angelegt, E-Mail aus der PDF übernommen
     await page.evaluate(() => {
@@ -210,7 +211,9 @@ test('Anmeldung per Registrierungs-PDF und per Eingabe, Fehlerfälle', async () 
     await page.waitForSelector(tid('login-upload'));
     await uploadLoginFile(page, pdfFile);
     await waitForHash(page, '#/lehrkraft/elternsprechtag');
-    await waitForToast(page, 'Auf diesem Gerät sind noch keine Daten gespeichert. Falls Sie einen Zwischenstand haben, laden Sie ihn oben über „Zwischenstand laden“.');
+    // Dauerhafter Hinweis mit eigenem Knopf statt eines kurzen Toasts
+    await page.locator('main .alert-info', { hasText: 'Auf diesem Gerät sind noch keine Daten gespeichert.' }).waitFor();
+    await page.waitForSelector(tid('empty-device-load'));
     let state = await storedState(page, 'A16595316960M');
     assert.deepEqual(state.teacher, { ...ANNA });
 
@@ -469,7 +472,7 @@ test('Anmeldung: Zwischenstand statt PDF, Kleinschreibung auf leerem Gerät, Abm
     await page.click(tid('login-submit'));
     await waitForHash(page, '#/lehrkraft/elternsprechtag');
     await waitForToast(page, 'Willkommen, Anna-Lena Meier!');
-    await waitForToast(page, 'Auf diesem Gerät sind noch keine Daten gespeichert.');
+    await page.locator('main .alert-info', { hasText: 'Auf diesem Gerät sind noch keine Daten gespeichert.' }).waitFor();
     const code = teacherCode('Anna-Lena', 'Meier', '1990-03-15');
     const state = await storedState(page, code);
     assert.equal(state.teacher.firstName, 'Anna-Lena');
@@ -505,6 +508,132 @@ test('Tablet (800 px): Felder der Anmeldung passen in ihre Karte', async () => {
     assert.ok(inputWidth >= 250, `Datumsfeld zu schmal: ${inputWidth}px`);
     await assertNoHorizontalScroll(page, 'Anmelden (Tablet)');
     await shot(page, 'tablet-1-anmelden');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+function classWithAnna() {
+  const code = `5a${ANNA.teacherCode}11414125311`;
+  return { id: '5a', grade: 5, letter: 'a', codesGenerated: true, students: [{ id: 's1', firstName: 'Anna', lastName: 'Beck', code, response: null, appointment: null }] };
+}
+
+test('Neues Gerät: Hinweis mit „Zwischenstand laden“, fremder Stand wird abgelehnt, danach geht es bei den Klassen weiter', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    const dir = await fs.mkdtemp(path.join(OUTPUT_DIR, 'backup-'));
+    const own = path.join(dir, 'Zwischenspeicher Anna.json');
+    await fs.writeFile(own, JSON.stringify(sampleState({ classes: [classWithAnna()] })));
+    // Anton Müller hat wegen gleicher Anfangsbuchstaben und gleichen Geburtsdatums denselben Lehrkräftecode
+    const anton = { ...ANNA, firstName: 'Anton', lastName: 'Müller', email: 'anton@andere-schule.example', registrationCode: registrationCode('Anton', 'Müller', ANNA.birthDate) };
+    assert.equal(teacherCode(anton.firstName, anton.lastName, anton.birthDate), ANNA.teacherCode);
+    const foreign = path.join(dir, 'Zwischenspeicher Anton.json');
+    await fs.writeFile(foreign, JSON.stringify(sampleState({ teacher: anton, classes: [] })));
+
+    await gotoRoute(page, '/lehrkraft/anmelden');
+    await fillLogin(page, { firstName: 'Anna', lastName: 'Meier', birthDate: ANNA.birthDate, code: ANNA.registrationCode });
+    await page.click(tid('login-submit'));
+    await waitForHash(page, '#/lehrkraft/elternsprechtag');
+    await page.click(tid('empty-device-load'));
+    await page.setInputFiles('.modal input[type=file]', foreign);
+    await page.locator('.modal .alert-error', { hasText: 'Dieser Zwischenspeicher gehört zu Anton Müller' }).waitFor();
+    await page.setInputFiles('.modal input[type=file]', own);
+    const confirm = page.locator('.modal', { hasText: 'Stand ersetzen?' });
+    await confirm.waitFor();
+    assert.match(await confirm.textContent(), /Zwischenstand von Anna Meier vom .*1 Klasse \(5a\)/);
+    await confirm.getByRole('button', { name: 'Ja, laden' }).click();
+    await waitForHash(page, '#/lehrkraft/klassen');
+    await page.waitForSelector(tid('class-tile-5a'));
+    // Nur noch der passende Hinweis, nicht mehr „Willkommen …“ oder „keine Daten“
+    await page.locator('.toast', { hasText: 'Zwischenstand geladen.' }).waitFor();
+    assert.deepEqual(await page.locator('.toast').allTextContents(), ['Zwischenstand geladen.×']);
+    assert.equal((await storedState(page, ANNA.teacherCode)).teacher.firstName, 'Anna');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Adressen: tolerante Schreibweise, „Seite nicht gefunden“, Rückkehr nach der Anmeldung, Pfad ohne #', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    await seedTeacher(page, server.url, sampleState({ classes: [classWithAnna()] }));
+    await gotoRoute(page, '/lehrkraft/klasse/5A');
+    await page.getByRole('heading', { level: 1, name: 'Klasse 5a' }).waitFor();
+    await gotoRoute(page, '/lehrkraft/klassen/');
+    await page.waitForSelector(tid('class-tile-5a'));
+    for (const route of ['/gibtsnicht', '/lehrkraft/klasse/14a']) {
+      await gotoRoute(page, route);
+      await page.getByRole('heading', { level: 1, name: 'Seite nicht gefunden' }).waitFor();
+      assert.equal(await page.evaluate(() => location.hash), `#${route}`, 'keine stille Umleitung');
+      assert.equal(await page.locator('.teacher-header').count(), 1, 'weiterhin als Lehrkraft angemeldet');
+    }
+    await page.click(tid('notfound-classes'));
+    await waitForHash(page, '#/lehrkraft/klassen');
+
+    // Abgemeldet eine Klasse aufrufen → nach der Anmeldung direkt dorthin
+    await logoutSilently(page);
+    await gotoRoute(page, '/lehrkraft/klasse/5a');
+    await waitForHash(page, '#/lehrkraft/anmelden');
+    await fillLogin(page, { firstName: 'Anna', lastName: 'Meier', birthDate: ANNA.birthDate, code: ANNA.registrationCode });
+    await page.click(tid('login-submit'));
+    await waitForHash(page, '#/lehrkraft/klasse/5a');
+    await page.getByRole('heading', { level: 1, name: 'Klasse 5a' }).waitFor();
+
+    // Pfad ohne „#“ (z. B. abgetippt): 404.html leitet auf die Seite weiter
+    await page.goto(`${server.url}eltern`);
+    await page.waitForURL(/\/#\/eltern$/);
+    await page.waitForSelector(tid('parent-firstname'));
+    assert.deepEqual(errors.filter((e) => !/Failed to load resource/.test(e)), []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Registrierung: Neuladen auf der Erfolgsseite – angemeldet, Hinweis statt leerem Formular', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    await registerViaUi(page, ANNA);
+    assert.equal(await sessionCode(page), ANNA.teacherCode);
+    await page.reload();
+    await page.waitForSelector(tid('reg-firstname'));
+    await page.locator('.tauth-session', { hasText: 'Sie sind angemeldet als Anna Meier' }).waitFor();
+    await page.click('[data-action="session-continue"]');
+    await waitForHash(page, '#/lehrkraft/elternsprechtag');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Tastatur und Bildschirmleser: Fokus nach dem Seitenwechsel, Dialoge halten den Fokus', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    await page.goto(server.url);
+    await page.focus(tid('start-teacher'));
+    await page.keyboard.press('Enter');
+    await waitForHash(page, '#/lehrkraft');
+    await page.waitForFunction(() => document.activeElement?.tagName === 'H1');
+    assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Zugang für Lehrkräfte');
+    await page.waitForFunction(() => /Zugang für Lehrkräfte/.test(document.querySelector('[data-testid="route-announcer"]').textContent));
+    await page.keyboard.press('Tab');
+    assert.notEqual(await page.evaluate(() => document.activeElement.className), 'skip-link', 'Tab springt nicht zurück an den Anfang');
+
+    // Dialog „Abmelden?“: Tab und Shift+Tab bleiben im Dialog, der Hintergrund ist gesperrt
+    await seedTeacher(page, server.url, sampleState());
+    await gotoRoute(page, '/lehrkraft/klassen');
+    await page.getByRole('button', { name: 'Abmelden' }).click();
+    await page.locator('.modal').waitFor();
+    assert.equal(await page.evaluate(() => document.getElementById('app').inert), true);
+    for (const key of ['Tab', 'Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
+      await page.keyboard.press(key);
+      assert.ok(await page.evaluate(() => Boolean(document.activeElement?.closest('.modal'))), `Fokus nach ${key} außerhalb des Dialogs`);
+    }
+    await page.keyboard.press('Escape');
+    await page.locator('.modal').waitFor({ state: 'detached' });
+    assert.equal(await page.evaluate(() => document.getElementById('app').inert), false);
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Abmelden');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

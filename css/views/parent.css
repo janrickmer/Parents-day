@@ -7,6 +7,8 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* Sehr lange Wörter (z. B. aus einem veränderten Link) umbrechen statt die Seite zu verbreitern */
+  overflow-wrap: anywhere;
 }
 .parent-page .page-header {
   margin-bottom: 0;
@@ -265,6 +267,11 @@
 .parent-slot:focus-visible {
   box-shadow: var(--focus);
   border-color: var(--c-primary);
+}
+/* Ausgewählter (grüner) Slot: dunkler Rahmen innen, damit der Fokus auf Grün deutlich zu sehen ist */
+.parent-slot[aria-pressed='true']:focus-visible {
+  border-color: var(--c-text);
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px var(--c-surface), 0 0 0 4px var(--c-primary);
 }
 
 .parent-day-summary {

@@ -124,6 +124,11 @@ async function downloadLetters(page, classId) {
   return { ...result, downloadName: download.suggestedFilename(), file, buffer: await fs.readFile(file) };
 }
 
+/** Termin-Schlüssel wie im Elternbrief: passt nur zu Codes dieser Klasse und Lehrkraft. */
+function letterKey(state, classId) {
+  return encodeEventKey(state.event, { teacherCode: state.teacher.teacherCode, classId });
+}
+
 function assertLetterPages(parsed, students, { teacherEmail, eventKey, codeOnOneLine = false }) {
   assert.equal(parsed.pages.length, students.length);
   parsed.pages.forEach((p, i) => {
@@ -140,11 +145,11 @@ function assertLetterPages(parsed, students, { teacherEmail, eventKey, codeOnOne
     assert.match(flat, /Ihre Zugangsdaten/);
     assert.match(flat, /Vorname des Kindes/);
     assert.match(flat, /Nachname des Kindes/);
-    assert.match(flat, /https:\/\/parents-day\.janrickmer\.de/);
+    assert.match(flat, /https:\/\/parentsday\.janrickmer\.de/);
     assert.match(flat, /Zugang für Eltern/);
     assert.match(flat, /Datum: \d{2}\.\d{2}\.\d{4}/);
-    assert.match(flat, /Gesprächsraster: 10 Minuten/);
-    assert.match(flat, /alle Terminslots/);
+    assert.match(flat, /Terminlänge: 10 Minuten/);
+    assert.match(flat, /alle Zeitslots/);
     assert.ok(compact.includes(teacherEmail.replace(/\s+/g, '')), `Seite ${i + 1}: E-Mail der Lehrkraft`);
     assert.match(flat, new RegExp(`Seite ${i + 1} von ${students.length}`));
     assert.ok(p.bottom > 200 && p.bottom <= 280, `Seite ${i + 1}: Inhalt reicht bis ${p.bottom.toFixed(1)} mm und stößt an die Fußzeile`);
@@ -170,7 +175,7 @@ test('Elternbriefe: eine A4-Seite je Kind mit Code, gelber Kasten, QR-Code und T
     if (!parsed) t.diagnostic('python3/pymupdf nicht verfügbar – Seiteninhalt nicht geprüft');
     else {
       assert.equal(parsed.title, 'ParentsDay – Elternbriefe Klasse 5a');
-      assertLetterPages(parsed, withCode, { teacherEmail: SAMPLE_TEACHER.email, eventKey: encodeEventKey(state.event), codeOnOneLine: true });
+      assertLetterPages(parsed, withCode, { teacherEmail: SAMPLE_TEACHER.email, eventKey: letterKey(state, '5a'), codeOnOneLine: true });
     }
     await renderPdfPage(letters.file, 'elternbrief-normal');
 
@@ -216,7 +221,7 @@ test('Elternbriefe: auch mit 3 Tagen, langer Adresse, langen Namen und langer E-
     const parsed = pdfPages(letters.file);
     if (!parsed) t.diagnostic('python3/pymupdf nicht verfügbar – Seiteninhalt nicht geprüft');
     else {
-      assertLetterPages(parsed, students, { teacherEmail: email, eventKey: encodeEventKey(state.event) });
+      assertLetterPages(parsed, students, { teacherEmail: email, eventKey: letterKey(state, '5a') });
       for (const p of parsed.pages) {
         for (const day of ['Donnerstag, 12.11.2026', 'Freitag, 13.11.2026', 'Montag, 16.11.2026']) assert.ok(p.text.includes(day), `Tag ${day} fehlt`);
       }
@@ -249,7 +254,7 @@ test('Elternbriefe: Grenzfall mit 80 Zeichen langen Namen, 8 Tagen und sehr lang
     const parsed = pdfPages(letters.file);
     if (!parsed) t.diagnostic('python3/pymupdf nicht verfügbar – Seiteninhalt nicht geprüft');
     else {
-      assertLetterPages(parsed, students, { teacherEmail: email, eventKey: encodeEventKey(state.event) });
+      assertLetterPages(parsed, students, { teacherEmail: email, eventKey: letterKey(state, '5a') });
       const lines = parsed.pages[0].text.split('\n').map((l) => l.trim());
       // Lange Namen werden an Leerzeichen/Bindestrichen umbrochen, nicht mitten im Wort
       for (const part of `${first} ${last}`.split(/[\s-]+/)) assert.ok(lines.some((l) => l.includes(part)), `„${part}“ wurde mitten im Wort getrennt`);
@@ -520,6 +525,41 @@ test('Upload-Bereich auf dem Smartphone: kein seitliches Scrollen, Dialog passt'
     await page.keyboard.press('Escape');
     await page.waitForSelector('.modal', { state: 'detached' });
     assert.equal(await page.evaluate(() => document.activeElement?.dataset.testid), 'response-paste', 'Fokus kehrt zum Knopf zurück');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Voller Speicher im Browser: Rückmeldungen werden nicht als „übernommen“ gemeldet', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    await seedTeacher(page, server.url, stateWithClasses());
+    await page.goto(`${server.url}#/lehrkraft/klasse/5a`);
+    await page.waitForSelector(tid('response-upload'));
+    // Speicher bis zum Rand füllen (wie nach vielen anderen Daten oder einer übergroßen Rückmeldung)
+    await page.evaluate(() => {
+      let chunk = 'x'.repeat(1024 * 1024);
+      let i = 0;
+      while (chunk.length > 0) {
+        try {
+          localStorage.setItem(`fuellung-${i++}`, chunk);
+        } catch {
+          chunk = chunk.slice(0, Math.floor(chunk.length / 2));
+        }
+      }
+    });
+    const file = path.join(tmp, 'Ben.txt');
+    await fs.writeFile(file, `Hallo\n${encodeResponseText(responsePayload('Ben', 'Cem', '5a'))}\n`);
+    await page.setInputFiles(`${tid('response-upload')} input[type=file]`, [file]);
+    const report = page.locator(tid('response-report'));
+    await report.locator('.alert-error', { hasText: 'Speichern im Browser nicht möglich' }).waitFor();
+    assert.doesNotMatch(await report.textContent(), /übernommen:/);
+    assert.match(await page.locator(tid('student-availability')).nth(1).textContent(), /Rückmeldung der Eltern ausstehend/);
+    // Die Kopfzeile meldet keinen neuen Speicherstand
+    const saved = await page.textContent(tid('save-indicator'));
+    await page.waitForTimeout(300);
+    assert.equal(await page.textContent(tid('save-indicator')), saved);
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

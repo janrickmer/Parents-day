@@ -182,7 +182,7 @@
   color: var(--c-warning);
 }
 .tcl-status-ready {
-  color: var(--c-success);
+  color: var(--c-success-text);
 }
 .tcl-tile-new {
   animation: tcl-highlight 1.6s ease-out;

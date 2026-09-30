@@ -87,16 +87,20 @@ function storageRemove(store, key) {
   }
 }
 
-/** Werden Daten in diesem Browser dauerhaft gespeichert (localStorage nutzbar)? */
+let persistent = null;
+
+/** Werden Daten in diesem Browser dauerhaft gespeichert (localStorage nutzbar)? Einmal je Seitenaufruf geprüft. */
 export function isPersistentStorage() {
+  if (persistent !== null) return persistent;
   try {
     const probe = 'parentsday.probe';
     localStorage.setItem(probe, '1');
     localStorage.removeItem(probe);
-    return true;
+    persistent = true;
   } catch {
-    return false;
+    persistent = false;
   }
+  return persistent;
 }
 
 /** Kurze zufällige ID. */
@@ -196,6 +200,33 @@ export function clearSession() {
   memoryFallback.delete(SESSION_KEY);
 }
 
+// --- Ziel nach der Anmeldung (z. B. direkt aufgerufene Klasse) ---
+
+const RETURN_KEY = 'parentsday.returnTo';
+const RETURN_MAX_AGE = 30 * 60 * 1000;
+
+/** Merkt sich eine Lehrkraft-Seite, die ohne Anmeldung aufgerufen wurde. */
+export function setReturnTo(path) {
+  try {
+    storageSet(sessionStorage, RETURN_KEY, JSON.stringify({ path, time: Date.now() }));
+  } catch {
+    // ohne Speicher geht es nach der Anmeldung zur Startseite der Lehrkraft
+  }
+}
+
+/** Gemerkte Seite (höchstens 30 Minuten alt) oder ''. Wird dabei gelöscht. */
+export function takeReturnTo() {
+  const raw = storageGet(sessionStorage, RETURN_KEY);
+  storageRemove(sessionStorage, RETURN_KEY);
+  try {
+    const data = JSON.parse(raw || 'null');
+    if (!data || typeof data.path !== 'string' || !data.path.startsWith('/lehrkraft/') || Date.now() - Number(data.time) > RETURN_MAX_AGE) return '';
+    return data.path;
+  } catch {
+    return '';
+  }
+}
+
 /** Zustand der angemeldeten Lehrkraft oder null. */
 export function getCurrentState() {
   const code = getSession();
@@ -284,7 +315,7 @@ function normalizeClasses(list) {
         id: sid,
         lastName: text(st.lastName, 200),
         firstName: text(st.firstName, 200),
-        code: text(st.code, 120),
+        code: text(st.code, 400), // 2 × 80 Buchstaben ergeben bis zu 320 Ziffern
         response: normalizeResponse(st.response),
         appointment: normalizeAppointment(st.appointment),
       };

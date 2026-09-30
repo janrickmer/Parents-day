@@ -1,27 +1,22 @@
 // Elternsprechtag erstellen (mode 'create') und „Weitere Einstellungen“ (mode 'settings'):
-// Tage im Kalender wählen, Anfangs- und Endzeit je Tag, Adresse der Schule, Standardlänge eines
-// Terminslots und E-Mail-Adresse für Rückmeldungen. In den Einstellungen zusätzlich: Hinweis auf
-// bereits erstellte Elternbriefe, Profil (nur lesen) und „Alle Daten in diesem Browser löschen“.
+// Tage im Kalender wählen, Anfangs- und Endzeit je Tag, Adresse der Schule, Terminlänge und
+// E-Mail-Adresse für Rückmeldungen. In den Einstellungen zusätzlich: Hinweis auf bereits erstellte
+// Elternbriefe, Profil (nur lesen) und „Alle Daten in diesem Browser löschen“.
 
-import { h, mount, toast, confirmDialog, alertBox, plural } from '../core/ui.js';
-import { updateState, getCurrentState, deleteTeacherState, clearSession } from '../core/storage.js';
-import { downloadBackup } from '../core/backup.js';
+import { MAX_EVENT_DAYS as MAX_DAYS, SLOT_MIN, SLOT_MAX, ADDRESS_MAX_CHARS, ADDRESS_MAX_LINES } from '../config.js';
+import { h, mount, toast, confirmDialog, alertBox, plural, friendlyError } from '../core/ui.js';
+import { updateState, getCurrentState, deleteTeacherState, clearSession, loadEventDraft, storeEventDraft, clearEventDraft, setDraftPending } from '../core/storage.js';
 import { toMinutes, fromMinutes, slotStarts, formatDate, formatDateWithWeekday, todayIso } from '../core/time.js';
 import { createCalendarPicker } from '../components/calendar-picker.js';
+import { saveBackupNow, openLoadBackupDialog, isEmptyDevice, markEmptyDevice } from '../components/backup-actions.js';
 import { isValidEmail } from '../core/codes.js';
 
-const MAX_DAYS = 8; // Grenze des Termin-Schlüssels (siehe core/transport.js)
+// Höchstens MAX_DAYS Tage: Grenze des Termin-Schlüssels (siehe core/transport.js).
+// Die Adresse steht im Link/QR-Code des Elternbriefs – längere Texte machen den QR-Code unlesbar.
 const DEFAULT_START = '14:00';
 const DEFAULT_END = '18:00';
 const DEFAULT_SLOT = 10;
-const SLOT_MIN = 5;
-const SLOT_MAX = 120;
-// Die Adresse steht im Link/QR-Code des Elternbriefs. Längere Texte machen den QR-Code
-// unlesbar (ab ca. 1300 Zeichen lässt er sich gar nicht mehr erzeugen).
-const ADDRESS_MAX_CHARS = 200;
-const ADDRESS_MAX_LINES = 6;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
-const DRAFT_PREFIX = 'parentsday.eventDraft.';
 
 // ---------- Entwurf und Prüfung ----------
 
@@ -36,22 +31,13 @@ function draftFromState(state) {
 }
 
 // ---------- Ungespeicherte Eingaben (bleiben bei Neuladen/Seitenwechsel im Tab erhalten) ----------
-
-/** Gespeicherter Stand, auf dem ein Entwurf beruht. Passt er nicht mehr, wird der Entwurf verworfen. */
-function draftBase(state) {
-  return JSON.stringify({ event: state.event || null, email: state.teacher.email || '' });
-}
-
-function draftKey(state) {
-  return DRAFT_PREFIX + state.teacher.teacherCode;
-}
+// Sie liegen im sessionStorage (core/storage.js) und kommen auch in den Zwischenspeicher.
 
 /** Liest einen noch nicht gespeicherten Entwurf dieses Tabs (oder null). */
 function loadStoredDraft(state) {
   try {
-    const data = JSON.parse(sessionStorage.getItem(draftKey(state)) || 'null');
-    if (!data || data.base !== draftBase(state) || !data.draft || !Array.isArray(data.draft.days)) return null;
-    const d = data.draft;
+    const d = loadEventDraft(state);
+    if (!d) return null;
     // Tage, die inzwischen in der Vergangenheit liegen, nur behalten, wenn sie schon gespeichert waren.
     const today = todayIso();
     const savedDates = new Set((state.event?.days || []).map((x) => x.date));
@@ -63,22 +49,6 @@ function loadStoredDraft(state) {
     return { days, address: String(d.address ?? ''), slot: String(d.slot ?? ''), email: String(d.email ?? '') };
   } catch {
     return null;
-  }
-}
-
-function storeDraft(state, draft) {
-  try {
-    sessionStorage.setItem(draftKey(state), JSON.stringify({ base: draftBase(state), draft }));
-  } catch {
-    // Speicher nicht verfügbar – dann gehen ungespeicherte Eingaben beim Neuladen verloren.
-  }
-}
-
-function clearStoredDraft(state) {
-  try {
-    sessionStorage.removeItem(draftKey(state));
-  } catch {
-    // ignorieren
   }
 }
 
@@ -119,7 +89,7 @@ function dayProblem(day, slot) {
   if (Number.isNaN(s)) return { message: 'Bitte geben Sie eine Anfangszeit ein.', fields: ['start'] };
   if (Number.isNaN(e)) return { message: 'Bitte geben Sie eine Endzeit ein.', fields: ['end'] };
   const off = [s % 5 ? 'start' : null, e % 5 ? 'end' : null].filter(Boolean);
-  if (off.length) return { message: 'Bitte Uhrzeiten in 5-Minuten-Schritten angeben (z. B. 14:00, 14:05 oder 14:10).', fields: off };
+  if (off.length) return { message: 'Bitte geben Sie die Uhrzeiten in 5-Minuten-Schritten an (z. B. 14:00, 14:05 oder 14:10).', fields: off };
   if (e <= s) return { message: 'Die Endzeit muss nach der Anfangszeit liegen.', fields: ['end'] };
   if (slot && e - s < slot) {
     return { message: `In diese Zeit passt kein Termin von ${slot} Minuten. Bitte wählen Sie eine spätere Endzeit oder eine kürzere Terminlänge.`, fields: ['end'] };
@@ -153,9 +123,9 @@ function validateDraft(draft) {
   }
   if (slot === null) {
     const n = Number(draft.slot);
-    let message = 'Bitte geben Sie die Länge eines Terminslots in Minuten ein.';
+    let message = 'Bitte geben Sie die Terminlänge in Minuten ein.';
     if (String(draft.slot).trim() !== '' && !Number.isNaN(n)) {
-      message = n < SLOT_MIN || n > SLOT_MAX ? `Die Terminlänge muss zwischen ${SLOT_MIN} und ${SLOT_MAX} Minuten liegen.` : 'Bitte die Terminlänge in 5-Minuten-Schritten angeben (z. B. 10 oder 15).';
+      message = n < SLOT_MIN || n > SLOT_MAX ? `Die Terminlänge muss zwischen ${SLOT_MIN} und ${SLOT_MAX} Minuten liegen.` : 'Bitte geben Sie die Terminlänge in 5-Minuten-Schritten an (z. B. 10 oder 15).';
     }
     errors.push({ key: 'slot', label: 'Terminlänge', message });
   }
@@ -199,7 +169,7 @@ export default function render(ctx) {
   // Noch nicht gespeicherte Eingaben aus diesem Tab (z. B. nach Neuladen oder Seitenwechsel) wiederherstellen.
   const restored = loadStoredDraft(saved);
   const draft = restored || draftFromState(saved);
-  if (restored && draftSignature(restored) === savedSignature) clearStoredDraft(saved);
+  if (restored && draftSignature(restored) === savedSignature) clearEventDraft(saved);
   else if (restored) {
     toast(isSettings ? 'Ihre noch nicht gespeicherten Änderungen wurden wiederhergestellt.' : 'Ihre bisherigen Eingaben wurden wiederhergestellt.', 'info', 6000);
   }
@@ -316,9 +286,11 @@ export default function render(ctx) {
         formField(
           'slot',
           'evt-slot',
-          'Standardlänge eines Terminslots (Minuten)',
+          'Terminlänge in Minuten',
           slotInput,
-          isSettings ? 'Gilt für die Zeitauswahl der Eltern und für neue Termine. Bereits geplante Termine behalten ihre Dauer.' : 'Kann später unter „Weitere Einstellungen“ geändert werden.',
+          isSettings
+            ? 'Standardlänge eines Termins. Gilt für die Zeitauswahl der Eltern und für neue Termine. Bereits geplante Termine behalten ihre Dauer.'
+            : 'Standardlänge eines Termins, z. B. 10 Minuten. Kann später unter „Weitere Einstellungen“ geändert werden.',
         ),
         formField('email', 'evt-email', 'E-Mail-Adresse für Rückmeldungen der Eltern', emailInput, 'Steht im Elternbrief. An diese Adresse schicken die Eltern ihre Rückmeldung.'),
       ),
@@ -424,9 +396,11 @@ export default function render(ctx) {
 
   /** Merkt sich ungespeicherte Eingaben im Tab und zeigt (nur in den Einstellungen) den Hinweis dazu. */
   function updateDirty() {
-    const dirty = draftSignature(draft) !== savedSignature;
-    if (dirty) storeDraft(saved, draft);
-    else clearStoredDraft(saved);
+    const dirty = !finished && draftSignature(draft) !== savedSignature;
+    if (dirty) storeEventDraft(saved, draft);
+    else clearEventDraft(saved);
+    // Kopfzeile: nicht „Automatisch gespeichert“ behaupten, solange hier Eingaben offen sind
+    setDraftPending(dirty);
     if (!isSettings) return;
     dirtyNote.textContent = dirty ? 'Sie haben ungespeicherte Änderungen.' : '';
     dirtyGroup.hidden = !dirty;
@@ -578,7 +552,7 @@ export default function render(ctx) {
       else saveNewEvent();
     } catch (err) {
       console.error(err);
-      toast(`Speichern fehlgeschlagen: ${err.message || err}`, 'error', 8000);
+      toast(`Speichern fehlgeschlagen. ${friendlyError(err)}`, 'error', 8000);
     } finally {
       busy = false;
       submitBtn.disabled = false;
@@ -592,8 +566,10 @@ export default function render(ctx) {
       s.event = event;
       s.teacher.email = email;
     });
-    clearStoredDraft(saved);
+    clearEventDraft(saved);
     finished = true;
+    setDraftPending(false);
+    markEmptyDevice(saved.teacher.teacherCode, false);
     toast('Ihr Elternsprechtag wurde erstellt. Legen Sie jetzt Ihre Klassen an.', 'success');
     navigate('/lehrkraft/klassen');
   }
@@ -673,10 +649,7 @@ export default function render(ctx) {
             class: 'btn btn-secondary',
             onclick: (e) => {
               if (ignoreRepeat(e)) return;
-              const state = getCurrentState();
-              if (!state) return;
-              const name = downloadBackup(state);
-              toast(`Zwischenstand gespeichert: „${name}“`, 'success');
+              saveBackupNow();
             },
           },
           'Zwischenstand jetzt speichern',
@@ -685,7 +658,8 @@ export default function render(ctx) {
     );
     const ok = await confirmDialog({ title: 'Alle Daten in diesem Browser löschen?', message: content, confirmText: 'Endgültig löschen', cancelText: 'Abbrechen', danger: true });
     if (!ok) return;
-    clearStoredDraft(saved);
+    clearEventDraft(saved);
+    setDraftPending(false);
     deleteTeacherState(saved.teacher.teacherCode);
     clearSession();
     toast('Ihre Daten wurden aus diesem Browser gelöscht.', 'success');
@@ -695,6 +669,19 @@ export default function render(ctx) {
   // --- Seite zusammensetzen ---
 
   const lettersClasses = saved.classes.filter((c) => c.codesGenerated).map((c) => c.id);
+  // Neues Gerät: dauerhafter Hinweis mit eigenem Knopf „Zwischenstand laden“ (statt eines kurzen Toasts)
+  const emptyDeviceHint =
+    !isSettings && saved.classes.length === 0 && isEmptyDevice(saved.teacher.teacherCode)
+      ? alertBox(
+          'info',
+          h(
+            'div',
+            { class: 'evt-empty-device' },
+            h('p', {}, h('strong', {}, 'Auf diesem Gerät sind noch keine Daten gespeichert. '), 'Falls Sie schon an einem anderen Gerät gearbeitet haben, laden Sie hier Ihren Zwischenstand – dann müssen Sie nichts neu eingeben.'),
+            h('button', { type: 'button', class: 'btn btn-secondary', 'data-testid': 'empty-device-load', onclick: () => openLoadBackupDialog({ navigate }) }, 'Zwischenstand laden'),
+          ),
+        )
+      : null;
   const t = saved.teacher;
   const profileRow = (label, value) => h('div', { class: 'evt-profile-row' }, h('dt', {}, label), h('dd', {}, value));
 
@@ -720,6 +707,7 @@ export default function render(ctx) {
           ),
         ),
       ),
+      emptyDeviceHint,
       isSettings && lettersClasses.length
         ? alertBox(
             'warning',
@@ -763,6 +751,8 @@ export default function render(ctx) {
     ),
   );
   renderDays();
+  // Beim Verlassen der Seite gilt der Hinweis „noch nicht gespeichert“ in der Kopfzeile nicht mehr.
+  return () => setDraftPending(false);
 }
 
 /** Zählt geplante Termine, die nicht mehr in die Uhrzeiten ihres Tages passen. */

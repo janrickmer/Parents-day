@@ -1,7 +1,7 @@
 // Browser-Tests: Elternsprechtag erstellen und „Weitere Einstellungen“.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, launch, seedTeacher, sampleState, SAMPLE_TEACHER } from './helpers.mjs';
+import { startServer, launch, seedTeacher, sampleState, captureDownload, SAMPLE_TEACHER } from './helpers.mjs';
 import { MONTHS, toIsoDate } from '../../js/core/time.js';
 
 let server;
@@ -160,7 +160,7 @@ test('Elternsprechtag erstellen: Prüfung der Eingaben', async () => {
     await page.fill(tid(`event-day-start-${d}`), '14:03');
     await page.fill(tid(`event-day-end-${d}`), '18:00');
     await page.fill(tid('event-email'), 'lehrkraft@schule.example');
-    await page.locator('.evt-day-error', { hasText: 'Bitte Uhrzeiten in 5-Minuten-Schritten angeben' }).waitFor();
+    await page.locator('.evt-day-error', { hasText: 'Bitte geben Sie die Uhrzeiten in 5-Minuten-Schritten an' }).waitFor();
     assert.equal(await page.getAttribute(tid(`event-day-start-${d}`), 'aria-invalid'), 'true');
 
     // Slotlänge: kein Vielfaches von 5 / zu groß; kein Slot passt in den Tag
@@ -604,6 +604,70 @@ test('„Zeiten übernehmen“ mit ungültigen Zeiten am ersten Tag ändert nich
     // Sammelhinweis hat einen zugänglichen Namen
     await page.click(tid('event-submit'));
     await page.getByRole('group', { name: 'Bitte prüfen Sie diese Angabe:' }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Zwischenstand enthält ungespeicherte Eingaben zum Elternsprechtag und stellt sie wieder her', async () => {
+  const { browser, page, errors } = await launch();
+  try {
+    // Fall A: noch kein Elternsprechtag, Tage und Angaben nur eingegeben
+    await seedTeacher(page, server.url, sampleState({ event: null }));
+    await page.goto(`${server.url}#/lehrkraft/elternsprechtag`);
+    await page.getByRole('heading', { level: 1, name: 'Elternsprechtag erstellen' }).waitFor();
+    assert.match(await page.textContent(tid('save-indicator')), /^Automatisch gespeichert/);
+    const target = await futureMonth(page, 1);
+    await page.click(tid('event-calendar-next'));
+    const d1 = `${target.ym}-15`;
+    const d2 = `${target.ym}-16`;
+    await page.click(day(d1));
+    await page.click(day(d2));
+    await page.fill(tid('event-address'), 'Neue Schule\nWeg 2\n54321 Neustadt');
+    await page.fill(tid('event-slot'), '15');
+    // Die Kopfzeile behauptet nicht mehr, alles sei gespeichert
+    assert.match(await page.textContent(tid('save-indicator')), /Ihre Eingaben auf dieser Seite sind noch nicht gespeichert/);
+
+    const backup = await captureDownload(page, () => page.click('[data-action="backup-save"]'));
+    await page.locator('.toast', { hasText: 'mit Ihren noch nicht gespeicherten Eingaben' }).waitFor();
+    const saved = JSON.parse(backup.buffer.toString('utf8'));
+    assert.equal(saved.event, null);
+    assert.deepEqual(
+      saved.eventDraft.days.map((d) => d.date),
+      [d1, d2],
+    );
+    assert.equal(saved.eventDraft.slot, '15');
+    assert.equal(saved.eventDraft.address, 'Neue Schule\nWeg 2\n54321 Neustadt');
+
+    // Anderes Gerät: Entwurf ist weg, Zwischenstand laden stellt ihn wieder her
+    await page.evaluate(() => sessionStorage.removeItem('parentsday.eventDraft.A16595316960M'));
+    await page.goto(`${server.url}#/lehrkraft/klassen`);
+    await page.waitForURL(/#\/lehrkraft\/elternsprechtag$/);
+    await page.click('[data-action="backup-load"]');
+    await page.setInputFiles('.modal input[type=file]', backup.file);
+    await page.getByRole('button', { name: 'Ja, laden' }).click();
+    await page.locator('.toast', { hasText: 'auch Ihre noch nicht gespeicherten Eingaben' }).waitFor();
+    await page.waitForURL(/#\/lehrkraft\/elternsprechtag$/);
+    await page.waitForFunction((sel) => document.querySelector(sel)?.getAttribute('aria-pressed') === 'true', day(d2));
+    assert.equal(await page.inputValue(tid('event-slot')), '15');
+    assert.equal(await page.inputValue(tid('event-address')), 'Neue Schule\nWeg 2\n54321 Neustadt');
+
+    // Fall B: „Weitere Einstellungen“ mit ungespeicherter Änderung
+    await seedTeacher(page, server.url, sampleState());
+    await page.goto(`${server.url}#/lehrkraft/einstellungen`);
+    await page.getByRole('heading', { level: 1, name: 'Weitere Einstellungen' }).waitFor();
+    await page.fill(tid('event-slot'), '15');
+    await page.locator('.evt-dirty', { hasText: 'ungespeicherte Änderungen' }).waitFor();
+    const backup2 = await captureDownload(page, () => page.click('[data-action="backup-save"]'));
+    const saved2 = JSON.parse(backup2.buffer.toString('utf8'));
+    assert.equal(saved2.event.slotMinutes, 10);
+    assert.equal(saved2.eventDraft.slot, '15');
+    // Nach dem Verlassen der Seite gilt wieder „Automatisch gespeichert“
+    await page.click('.header-nav >> text=Klassen');
+    await page.waitForURL(/#\/lehrkraft\/klassen$/);
+    await page.waitForSelector(tid('class-create'));
+    assert.match(await page.textContent(tid('save-indicator')), /^Automatisch gespeichert/);
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

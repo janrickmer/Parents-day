@@ -9,7 +9,7 @@
 // Ohne Ziehen (Touch/Tastatur): Namen antippen (auswählen) und danach in eine Tagesspalte tippen –
 // oder im Detailfeld Tag und Uhrzeit wählen. Jede Änderung wird sofort gespeichert.
 
-import { h, mount, toast, alertBox } from '../core/ui.js';
+import { h, mount, toast, alertBox, friendlyError } from '../core/ui.js';
 import { updateState, getCurrentState, findClass } from '../core/storage.js';
 import { toMinutes, fromMinutes, formatDate, formatDateWithWeekday, formatRange, formatRanges, availabilityStatus, normalizeRanges, parseIsoDate, WEEKDAYS_SHORT } from '../core/time.js';
 import { savePdf, openPdfForPrint, preloadPdf } from '../core/pdf.js';
@@ -34,6 +34,20 @@ const STATUS_TEXT = {
 const fullName = (s) => `${s.firstName || ''} ${s.lastName || ''}`.replace(/\s+/g, ' ').trim();
 const snap = (minutes) => Math.round(minutes / SNAP) * SNAP;
 const durationText = (minutes) => `(${minutes} Min.)`;
+
+/**
+ * Name und Dauer als getrennte Teile: gekürzt wird nur der Name, „(10 Min.)“ bleibt immer sichtbar.
+ * In sehr schmalen Spalten zeigt CSS die Kurzform „(10′)“.
+ */
+function nameWithDuration(name, minutes, prefix = '') {
+  return h(
+    'span',
+    { class: 'sched-appt-text' },
+    h('span', { class: 'sched-appt-name' }, prefix, name),
+    ' ', // Leerzeichen für Textauszug und Vorlesen (im Flex-Layout unsichtbar)
+    h('span', { class: 'sched-appt-dur' }, h('span', { class: 'sched-dur-long' }, durationText(minutes)), h('span', { class: 'sched-dur-short', 'aria-hidden': 'true' }, `(${minutes}′)`)),
+  );
+}
 
 /** "2026-11-12" → "Do, 12.11.2026" */
 function dayShort(iso) {
@@ -167,7 +181,7 @@ export default function render(ctx) {
           h('h1', {}, `Gespräche terminieren – Klasse ${classId}`),
           alertBox(
             'info',
-            h('strong', {}, 'Bitte zuerst in der Klasse die Codes erzeugen. '),
+            h('strong', {}, 'Bitte erzeugen Sie zuerst in der Klasse die Codes. '),
             partlyDone
               ? 'Für neu eingetragene Lernende fehlen noch Codes. Klicken Sie in der Klasse auf „Alle Lernenden erfolgreich eingetragen“ – bereits eingetragene Termine bleiben erhalten.'
               : 'Tragen Sie dazu alle Lernenden ein und klicken Sie auf „Alle Lernenden erfolgreich eingetragen“. Danach können Sie hier die Gespräche terminieren.',
@@ -247,7 +261,7 @@ export default function render(ctx) {
       return true;
     } catch (err) {
       console.error(err);
-      toast(`Die Änderung konnte nicht gespeichert werden: ${err.message}`, 'error', 8000);
+      toast(`Die Änderung konnte nicht gespeichert werden. ${friendlyError(err)}`, 'error', 8000);
       return false;
     }
   }
@@ -549,7 +563,7 @@ export default function render(ctx) {
       h(
         'span',
         { class: 'sched-appt-row' },
-        h('span', { class: 'sched-appt-text' }, h('span', { class: 'sched-appt-name' }, name), ' ', h('span', { class: 'sched-appt-dur' }, durationText(duration))),
+        nameWithDuration(name, duration),
         status === 'unknown' ? h('span', { class: 'sched-q', title: STATUS_TEXT.unknown, 'aria-hidden': 'true' }, '?') : null,
       ),
       duration >= 20 ? h('span', { class: 'sched-appt-time' }, time) : null,
@@ -1070,6 +1084,7 @@ export default function render(ctx) {
       h('span', { class: 'sched-ghost-where' }),
     );
     drag.preview = h('div', { class: 'sched-appt sched-preview', 'aria-hidden': 'true' }, h('span', { class: 'sched-preview-text' }));
+    drag.previewKey = '';
     try {
       drag.source.setPointerCapture(drag.pointerId);
     } catch {
@@ -1135,7 +1150,12 @@ export default function render(ctx) {
       pv.dataset.status = status;
       pv.style.top = `${(start - day.start) * PX}px`;
       pv.style.height = `${duration * PX}px`;
-      pv.firstChild.textContent = `${fromMinutes(start)} · ${fullName(st)} ${durationText(duration)}`;
+      // Uhrzeit und Name dürfen gekürzt werden, die Dauer nicht
+      const key = `${start}|${duration}`;
+      if (d.previewKey !== key) {
+        d.previewKey = key;
+        mount(pv.firstChild, nameWithDuration(fullName(st), duration, `${fromMinutes(start)} · `));
+      }
       where.textContent = `${dayTiny(day.date)} · ${formatRange(start, start + duration)} – ${STATUS_TEXT[status]}`;
       d.ghost.dataset.status = status;
     } else {
@@ -1284,7 +1304,6 @@ export default function render(ctx) {
         printed = false;
       }
       if (!printed) w?.close();
-      toast('Termine gespeichert – die PDF-Datei wurde heruntergeladen.', 'success');
       const pages = result.appointmentCount === 1 ? '1 Terminbestätigung' : `${result.appointmentCount} Terminbestätigungen`;
       mount(
         messages,
@@ -1298,7 +1317,7 @@ export default function render(ctx) {
     } catch (err) {
       console.error(err);
       w?.close();
-      mount(messages, alertBox('error', h('strong', {}, 'Die PDF-Datei konnte nicht erstellt werden. '), err?.message || String(err)));
+      mount(messages, alertBox('error', h('strong', {}, 'Die PDF-Datei konnte nicht erstellt werden. '), friendlyError(err)));
     } finally {
       finalizing = false;
       finalizeBtn.disabled = false;

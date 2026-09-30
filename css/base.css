@@ -8,7 +8,7 @@
   --c-text: #1d2433;
   --c-muted: #5b6475;
   --c-border: #d8dee8;
-  --c-border-strong: #b8c2d3;
+  --c-border-strong: #7b8597; /* Rand von Eingabefeldern: mind. 3:1 gegen Weiß */
 
   --c-primary: #1f5fae;
   --c-primary-dark: #174a88;
@@ -18,6 +18,7 @@
   --c-accent-border: #e2b400;
 
   --c-success: #1e8e4e;
+  --c-success-text: #17703d; /* grüne Schrift, auch klein gut lesbar (≥ 4,5:1) */
   --c-success-soft: #e3f5ea;
   --c-warning: #b85f00;
   --c-warning-soft: #fff1e0;
@@ -39,7 +40,8 @@
   --shadow-strong: 0 10px 40px rgba(20, 30, 60, 0.2);
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
-  --focus: 0 0 0 3px rgba(31, 95, 174, 0.35);
+  /* Doppelter Fokusring: weißer Innenring, kräftig blauer Außenring – auch auf farbigen Flächen sichtbar */
+  --focus: 0 0 0 2px var(--c-surface), 0 0 0 4px var(--c-primary);
 }
 
 *,
@@ -112,6 +114,14 @@ a:hover {
 }
 .main:focus {
   outline: none;
+}
+/* Überschrift, auf die nach einem Seitenwechsel der Fokus gesetzt wird: kein Rahmen */
+.main h1[tabindex='-1']:focus {
+  outline: none;
+  box-shadow: none;
+}
+.noscript-note {
+  padding: 2rem;
 }
 
 .visually-hidden {
@@ -260,6 +270,10 @@ a:hover {
   font-size: 0.78rem;
   color: var(--c-muted);
   padding: 0 0 6px;
+}
+.save-indicator-warning {
+  color: var(--c-warning);
+  font-weight: 600;
 }
 
 .site-footer {
@@ -584,7 +598,7 @@ textarea[aria-invalid='true'] {
 .badge-success {
   background: var(--c-success-soft);
   border-color: #b5e0c5;
-  color: var(--c-success);
+  color: var(--c-success-text);
 }
 .badge-warning {
   background: var(--c-warning-soft);
@@ -730,15 +744,48 @@ textarea[aria-invalid='true'] {
   gap: 8px;
   z-index: 200;
   max-width: min(420px, calc(100vw - 32px));
+  /* Klicks gehen durch den leeren Bereich hindurch – nur die Hinweise selbst sind anklickbar */
+  pointer-events: none;
 }
 .toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   background: #1d2433;
   color: #fff;
   border-radius: 10px;
-  padding: 12px 16px;
+  padding: 12px 8px 12px 16px;
   box-shadow: var(--shadow-strong);
   border-left: 5px solid var(--c-primary);
   transition: opacity 0.3s, transform 0.3s;
+  pointer-events: auto;
+}
+.toast-text {
+  flex: 1;
+  min-width: 0;
+}
+.toast-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px 0 -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.toast-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.15);
+}
+.toast-close:focus-visible {
+  box-shadow: 0 0 0 2px #fff;
 }
 .toast-success {
   border-left-color: var(--c-available);
@@ -795,9 +842,10 @@ textarea[aria-invalid='true'] {
 }
 
 @media (min-width: 721px) {
-  /* Fokussierte Felder nicht unter der fixierten Kopfzeile verstecken. */
+  /* Fokussierte Felder nicht unter der klebenden Kopfzeile verstecken. Die tatsächliche Höhe der
+     Kopfzeile (--header-h) setzt app.js – sie ist auf Tablets hochkant zweizeilig. */
   html {
-    scroll-padding-top: 110px;
+    scroll-padding-top: calc(var(--header-h, 110px) + 12px);
   }
 }
 
@@ -823,6 +871,14 @@ textarea[aria-invalid='true'] {
   }
   .teacher-header .header-actions .btn {
     flex: 1 1 auto;
+  }
+  /* Hinweise oben: dort verdecken sie nicht die Knöpfe am unteren Rand */
+  .toast-host {
+    top: 12px;
+    bottom: auto;
+    left: 12px;
+    right: 12px;
+    max-width: none;
   }
   .card {
     padding: 16px;

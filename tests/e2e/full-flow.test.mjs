@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer, launch, captureDownload, pdfPayload, pdfPageCount } from './helpers.mjs';
 import { toMinutes } from '../../js/core/time.js';
+import { PUBLIC_URL } from '../../js/config.js';
 
 const tid = (id) => `[data-testid="${id}"]`;
 const PX = 3; // Pixel pro Minute in der Terminansicht
@@ -61,6 +62,16 @@ test('Gesamtablauf von der Registrierung bis zum Zwischenspeicher', { timeout: 1
   try {
     // ---------- Registrierung ----------
     await page.goto(srv.url);
+    // Content-Security-Policy: nur eigene Skripte und Stile (auch ohne Inline-Stile). Verstöße würden
+    // als Konsolenfehler auffallen – am Ende wird geprüft, dass es keine gibt.
+    const csp = await page.getAttribute('meta[http-equiv="Content-Security-Policy"]', 'content');
+    assert.match(csp, /default-src 'none'/);
+    assert.match(csp, /script-src 'self'/);
+    assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval/);
+    const violations = [];
+    await page.exposeFunction('reportCspViolation', (v) => violations.push(v));
+    await page.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => window.reportCspViolation(`${e.violatedDirective} ${e.blockedURI}`)));
+    await page.reload();
     await page.click(tid('start-teacher'));
     await page.click(tid('auth-choose-register'));
     await page.fill(tid('reg-firstname'), 'Anna');
@@ -133,9 +144,9 @@ test('Gesamtablauf von der Registrierung bis zum Zwischenspeicher', { timeout: 1
       const t = await import('./js/core/transport.js');
       const s = await import('./js/core/storage.js');
       const st = s.getCurrentState();
-      return { link: t.eventLink(st, '5a'), key: t.encodeEventKey(st.event) };
+      return { link: t.eventLink(st, '5a'), key: t.encodeEventKey(st.event, { teacherCode: st.teacher.teacherCode, classId: '5a' }) };
     });
-    const localLink = link.replace('https://parents-day.janrickmer.de/', srv.url);
+    const localLink = link.replace(`${PUBLIC_URL}/`, srv.url);
 
     // ---------- Eltern 1: QR-Link, Smartphone ----------
     const p1 = await launch({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -232,6 +243,8 @@ test('Gesamtablauf von der Registrierung bis zum Zwischenspeicher', { timeout: 1
     await dp.click('[data-action="backup-load"]');
     await dp.setInputFiles('.modal input[type=file]', backup.file);
     await dp.getByRole('button', { name: 'Ja, laden' }).click();
+    // Mit Elternsprechtag geht es nach dem Laden bei den Klassen weiter
+    await dp.waitForURL(/#\/lehrkraft\/klassen$/);
     await dp.goto(`${srv.url}#/lehrkraft/klasse/5a`);
     await dp.waitForSelector(tid('student-row'));
     assert.equal(await dp.locator(tid('student-row')).count(), 3);
@@ -240,6 +253,7 @@ test('Gesamtablauf von der Registrierung bis zum Zwischenspeicher', { timeout: 1
     await dp.waitForSelector(`${tid(`appointment-${byName.Ayşe.id}`)}[data-status="partial"]`);
 
     for (const ctx of [teacher, ...parents]) assert.deepEqual(ctx.errors, []);
+    assert.deepEqual(violations, []);
   } finally {
     for (const ctx of parents) await ctx.browser.close();
     await teacher.browser.close();

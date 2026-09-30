@@ -108,3 +108,37 @@ test('Gleicher Lehrkräftecode, aber andere Person wird erkannt', async () => {
   assert.ok(!isSameTeacher(stored, 'Andreas', 'Müller', '1990-03-15'));
   assert.ok(!isSameTeacher(null, 'Anna', 'Meier', '1990-03-15'));
 });
+
+test('Lehrkräftecode tolerant vergleichen: Akzente an den Anfangsbuchstaben, I und l', async () => {
+  const { teacherCodesMatch, studentCodesMatch } = await import('../../js/core/codes.js');
+  const lukasz = teacherCode('Łukasz', 'Żak', '1987-06-24');
+  assert.match(lukasz, /^Ł\d+Ż$/);
+  assert.ok(teacherCodesMatch(lukasz, lukasz.replace('Ł', 'L').replace('Ż', 'Z')), 'L und Z statt Ł und Ż');
+  const ina = teacherCode('Ina', 'Lorenz', '1990-03-15');
+  assert.ok(teacherCodesMatch(ina, `l${ina.slice(1)}`), 'kleines l statt großem I');
+  assert.ok(!teacherCodesMatch('A16595316960M', 'A16595316690M'), 'Zahlendreher bleibt ein anderer Code');
+  assert.ok(!teacherCodesMatch('A16595316960M', 'B16595316960M'));
+  const code = studentCode(7, 'b', lukasz, 'Anna', 'Beck');
+  assert.ok(studentCodesMatch(code, code.replace('Ł', 'L').replace('Ż', 'Z')));
+  assert.ok(!studentCodesMatch(code, studentCode(7, 'c', lukasz, 'Anna', 'Beck')));
+});
+
+test('Eltern-Anmeldung: Grund des Fehlers, Sie-Form und Schreibweise aus dem Link', () => {
+  const code = '5aA16595316960M11414125311';
+  const names = { firstName: 'Anna', lastName: 'Beck' };
+  assert.equal(checkStudentLogin({ ...names, code }, { teacherCode: 'B1M' }).reason, 'teacher');
+  assert.equal(checkStudentLogin({ ...names, code }, { classId: '6a' }).reason, 'class');
+  assert.equal(checkStudentLogin({ firstName: 'Anne', lastName: 'Beck', code }).reason, 'name-code');
+  // Meldungen in der Sie-Form, bei fremdem Brief mit Hinweis auf den Termin-Schlüssel
+  assert.match(checkStudentLogin({ firstName: '', lastName: '', code }).error, /^Bitte geben Sie /);
+  assert.match(checkStudentLogin({ ...names, code: '' }).error, /^Bitte geben Sie den Code/);
+  assert.match(checkStudentLogin({ ...names, code }, { teacherCode: 'B1M' }).error, /Termin-Schlüssel/);
+  assert.match(checkStudentLogin({ ...names, code }, { classId: '6a' }).error, /QR-Code aus dem Elternbrief/);
+  // Aus dem Brief abgetippt mit „L“ statt „Ł“: angenommen, gespeichert wird die Schreibweise der Lehrkraft
+  const tc = teacherCode('Łukasz', 'Żak', '1987-06-24');
+  const real = studentCode(7, 'b', tc, 'Anna', 'Beck');
+  const typed = real.replace('Ł', 'L').replace('Ż', 'Z');
+  const result = checkStudentLogin({ ...names, code: typed }, { teacherCode: tc, classId: '7b' });
+  assert.equal(result.ok, true);
+  assert.equal(result.code, real);
+});

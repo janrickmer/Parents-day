@@ -17,7 +17,7 @@ Die Seite ist **rein statisch**. Es gibt keinen Server und keine Datenbank. Alle
 5. **Eltern**: Sie scannen den QR-Code im Brief, melden sich an, markieren ihre freien Slots grün und klicken auf **„Absenden“**. Das Rückmelde-PDF wird heruntergeladen. Danach schicken sie es per Knopf „E-Mail an die Lehrkraft schreiben“ an die Lehrkraft, auf dem Smartphone auch per „PDF teilen“. Ohne QR-Code geht die Anmeldung zusätzlich mit dem Termin-Schlüssel aus dem Brief.
 6. **Rückmeldungen hochladen**: Die Lehrkraft lädt alle PDFs gesammelt hoch. Die Klasse wird am Code erkannt, und die Spalte „Verfügbarkeit der Eltern“ füllt sich.
 7. **Gespräche terminieren**: Sie ziehen die Namen in die Tagesansicht. Die Blöcke sind je nach Verfügbarkeit der Eltern blau, orange oder rot. Mit **„Termine festlegen, speichern und drucken“** entsteht ein PDF: eine Terminbestätigung pro Kind und als letzte Seite eine Übersicht.
-8. **Zwischenstand**: Jederzeit können Sie über „Zwischenstand speichern“ die Datei `Zwischenspeicher vom TT.MM.JJJJ um hh꞉mm für ParentsDay.json` herunterladen. Nach dem Anmelden laden Sie sie über „Zwischenstand laden“ wieder hoch.
+8. **Zwischenstand**: Jederzeit können Sie über „Zwischenstand speichern“ die Datei `Zwischenspeicher vom TT.MM.JJJJ um hh꞉mm für ParentsDay.json` herunterladen. Sie enthält auch Eingaben zum Elternsprechtag, die Sie noch nicht gespeichert haben. Nach dem Anmelden laden Sie sie über „Zwischenstand laden“ wieder hoch. Auf einem neuen Gerät zeigt ParentsDay dafür nach der Anmeldung einen eigenen Knopf.
 
 ## Codes
 
@@ -29,16 +29,20 @@ Die Seite ist **rein statisch**. Es gibt keinen Server und keine Datenbank. Alle
 
 Umlaute werden für den Zahlencode umgeschrieben (ä→ae, ö→oe, ü→ue, ß→ss). Akzente werden entfernt, alle anderen Zeichen ignoriert.
 
+Der **Termin-Schlüssel** im Elternbrief passt nur zu den Codes dieses Briefs, also zu Lehrkraft und Klasse. Tippfehler im Lehrkräftecode fallen so schon bei der Anmeldung auf. Anfangsbuchstaben wie „Ł“ dürfen die Eltern als „L“ abtippen.
+
 ## Veröffentlichen
 
 Die Seite braucht nur einen Webspace, der Dateien ausliefert. Einen Build-Schritt gibt es nicht.
 
 **GitHub Pages:**
-1. Unter *Settings → Pages* bei *Source* den Branch mit diesen Dateien und den Ordner `/ (root)` wählen.
-2. Die Datei `CNAME` enthält bereits `parents-day.janrickmer.de`. Beim DNS-Anbieter der Domain legen Sie einen `CNAME`-Eintrag `parents-day` → `<github-benutzername>.github.io` an.
-3. Unter *Settings → Pages* „Enforce HTTPS“ aktivieren.
+1. Unter *Settings → Pages* bei *Source* „Deploy from a branch“, den Branch `main` und den Ordner `/ (root)` wählen.
+2. Als *Custom domain* `parentsday.janrickmer.de` eintragen (steht auch in der Datei `CNAME`). Beim DNS-Anbieter zeigt der `CNAME`-Eintrag `parentsday` auf `janrickmer.github.io`.
+3. Sobald GitHub das Zertifikat ausgestellt hat, unter *Settings → Pages* „Enforce HTTPS“ aktivieren.
 
-**Anderer Webspace:** Alle Dateien (ohne `node_modules/` und `tests/`) in das Webverzeichnis der Subdomain kopieren.
+**Anderer Webspace:** Alle Dateien (ohne `node_modules/` und `tests/`) in das Webverzeichnis der Subdomain kopieren. Stellen Sie `404.html` als Fehlerseite ein, z. B. mit `ErrorDocument 404 /404.html`. Dann führen abgetippte Adressen ohne „#“ (z. B. `/eltern`) zur richtigen Seite. GitHub Pages macht das automatisch.
+
+`index.html` enthält eine strenge Content-Security-Policy. Fremde Skripte, Inline-Skripte und Inline-Stile blockiert der Browser.
 
 Die Adresse, die in Elternbriefe und QR-Codes gedruckt wird, steht in `js/config.js` (`PUBLIC_URL`).
 

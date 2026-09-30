@@ -31,13 +31,19 @@ const FONT_URLS = {
 let jsPdfPromise = null;
 let fontPromise = null;
 
+const LIBRARY_ERROR = 'Die PDF-Bibliothek konnte nicht geladen werden. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.';
+const FONT_ERROR = 'Die Schrift für PDFs konnte nicht geladen werden. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.';
+
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const el = document.createElement('script');
     el.src = src;
     el.async = true;
     el.onload = () => resolve();
-    el.onerror = () => reject(new Error('Die PDF-Bibliothek konnte nicht geladen werden.'));
+    el.onerror = () => {
+      el.remove();
+      reject(new Error(LIBRARY_ERROR));
+    };
     document.head.appendChild(el);
   });
 }
@@ -58,9 +64,14 @@ export function preloadPdf() {
   if (!fontPromise) {
     fontPromise = Promise.all(
       Object.entries(FONT_URLS).map(async ([style, url]) => {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Die Schrift für PDFs konnte nicht geladen werden.');
-        return [style, arrayBufferToBase64(await res.arrayBuffer())];
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(FONT_ERROR);
+          return [style, arrayBufferToBase64(await res.arrayBuffer())];
+        } catch {
+          // Netzwerkfehler („Failed to fetch“) nicht auf Englisch anzeigen
+          throw new Error(FONT_ERROR);
+        }
       }),
     ).then(Object.fromEntries);
     fontPromise.catch(() => (fontPromise = null));
@@ -195,12 +206,15 @@ export function drawInfoBox(doc, y, rows, { x = PAGE.margin, width = CONTENT_WID
 
 /**
  * Tabelle mit Kopfzeile, Zebra-Streifen und automatischem Seitenumbruch (Kopfzeile wird wiederholt).
- * @param {{x?:number, columns: Array<{header:string, width:number, align?:'left'|'right'|'center'}>, rows: string[][], size?:number}} opts
+ * `reserveAfterLast` (mm): Platz, der unter der letzten Zeile auf derselben Seite frei bleiben muss
+ * (z. B. für eine Summenzeile). Reicht er nicht, kommen die letzten Zeilen mit auf die neue Seite –
+ * so steht nie eine Zeile allein unter der Tabelle auf einer eigenen Seite.
+ * @param {{x?:number, columns: Array<{header:string, width:number, align?:'left'|'right'|'center'}>, rows: string[][], size?:number, pad?:number, reserveAfterLast?:number}} opts
  * @returns {number} y-Position unter der Tabelle
  */
-export function drawTable(doc, y, { x = PAGE.margin, columns, rows, size = 10 }) {
-  const pad = 2;
+export function drawTable(doc, y, { x = PAGE.margin, columns, rows, size = 10, pad = 2, reserveAfterLast = 0 }) {
   const lh = lineHeight(doc, size);
+  const bottom = PAGE.height - 18;
   const totalWidth = columns.reduce((a, c) => a + c.width, 0);
   const drawHeader = (yy) => {
     doc.setFillColor(COLORS.tableHeader);
@@ -214,12 +228,22 @@ export function drawTable(doc, y, { x = PAGE.margin, columns, rows, size = 10 })
     }
     return yy + lh + 2 * pad;
   };
+  setText(doc, { size });
+  const cells = rows.map((row) => row.map((cell, ci) => doc.splitTextToSize(String(cell ?? ''), columns[ci].width - 2 * pad)));
+  const heights = cells.map((cellLines) => Math.max(...cellLines.map((l) => l.length)) * lh + 2 * pad);
+  const rest = (from) => heights.slice(from).reduce((a, b) => a + b, 0);
+  // Die letzten beiden Zeilen bleiben zusammen und mit der Reserve auf einer Seite.
+  const tailStart = Math.max(0, rows.length - 2);
+  const needFor = (ri) => (reserveAfterLast && ri >= tailStart ? rest(ri) + reserveAfterLast : heights[ri]);
+  // Kopfzeile nie allein am Seitenende
+  if (rows.length && y + lh + 2 * pad + needFor(0) > bottom) {
+    doc.addPage();
+    y = PAGE.margin;
+  }
   y = drawHeader(y);
-  rows.forEach((row, ri) => {
-    setText(doc, { size });
-    const cellLines = row.map((cell, ci) => doc.splitTextToSize(String(cell ?? ''), columns[ci].width - 2 * pad));
-    const h = Math.max(...cellLines.map((l) => l.length)) * lh + 2 * pad;
-    if (y + h > PAGE.height - 18) {
+  cells.forEach((cellLines, ri) => {
+    const h = heights[ri];
+    if (ri > 0 && y + needFor(ri) > bottom) {
       doc.addPage();
       y = drawHeader(PAGE.margin);
     }

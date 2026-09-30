@@ -1,13 +1,15 @@
 // Klassenansicht (#/lehrkraft/klasse/<id>): Tabelle der Lernenden (Nr., Nachname, Vorname, Code,
-// Verfügbarkeit der Eltern), Codes erzeugen, Elternschreiben als PDF, Rückmeldungen hochladen,
-// „Gespräche terminieren“ und „Klasse löschen“.
+// Verfügbarkeit der Eltern), Codes erzeugen, Elternbriefe als PDF („Elternschreiben für diese Klasse
+// erstellen“), Rückmeldungen hochladen, „Gespräche terminieren“ und „Klasse löschen“.
 //
 // Eingaben werden sofort (verzögert um SAVE_DELAY bzw. beim Verlassen des Feldes) gespeichert,
 // ohne die Tabelle neu aufzubauen – der Fokus bleibt also beim Tippen erhalten.
 // Komplett leere Zeilen existieren nur auf der Seite und werden nicht gespeichert.
+// Gespeichert werden nur die in diesem Tab geänderten bzw. gelöschten Zeilen: Ist dieselbe Klasse in
+// einem zweiten Tab offen, gehen dort ergänzte Lernende und Rückmeldungen nicht verloren.
 
-import { h, mount, toast, confirmDialog, alertBox, plural } from '../core/ui.js';
-import { updateState, getCurrentState, findClass, newId } from '../core/storage.js';
+import { h, mount, toast, confirmDialog, alertBox, plural, friendlyError } from '../core/ui.js';
+import { updateState, getCurrentState, findClass, newId, teacherStorageKey } from '../core/storage.js';
 import { cleanName, hasCodeLetters, studentCode, studentNameCode, transliterate } from '../core/codes.js';
 import { WEEKDAYS_SHORT, parseIsoDate, formatRanges, formatRange, formatTimestamp, toMinutes, fromMinutes } from '../core/time.js';
 import { savePdf, preloadPdf } from '../core/pdf.js';
@@ -17,7 +19,9 @@ const SAVE_DELAY = 300;
 const MAX_NAME = 80;
 // Schutz vor Doppelklicks: zweiter Klick innerhalb dieser Zeit wird ignoriert
 const DOUBLE_CLICK_MS = 700;
+const CLASS_GONE = 'Die Klasse wurde inzwischen gelöscht (z. B. in einem anderen Fenster).';
 const LABEL_ENTER = 'Alle Lernenden erfolgreich eingetragen';
+// Knopftext laut Anforderung; sonst heißt es überall „Elternbrief“.
 const LABEL_LETTERS = 'Elternschreiben für diese Klasse erstellen';
 
 // ---------- Hilfen ----------
@@ -26,15 +30,19 @@ function blankRow() {
   return { id: newId(), lastName: '', firstName: '', code: '', response: null, appointment: null };
 }
 
-function rowsFromClass(cls) {
-  const rows = cls.students.map((s) => ({
+function rowFromStudent(s) {
+  return {
     id: s.id,
     lastName: s.lastName || '',
     firstName: s.firstName || '',
     code: s.code || '',
     response: s.response || null,
     appointment: s.appointment || null,
-  }));
+  };
+}
+
+function rowsFromClass(cls) {
+  const rows = cls.students.map(rowFromStudent);
   return rows.length ? rows : [blankRow()];
 }
 
@@ -151,6 +159,11 @@ export default function render(ctx) {
 
   const { grade, letter } = initial;
   let rows = rowsFromClass(initial);
+  // Zeilen, die in diesem Tab geändert bzw. gelöscht wurden, und die zuletzt gespeicherten IDs –
+  // nur diese Änderungen werden auf den (vielleicht in einem anderen Tab geänderten) Stand angewendet.
+  const dirty = new Set();
+  const removed = new Set();
+  let loadedIds = new Set(initial.students.map((s) => s.id));
   let saveTimer = null;
   let busy = false;
   let deleted = false;
@@ -181,7 +194,7 @@ export default function render(ctx) {
   };
   const rowById = (id) => rows.find((r) => r.id === id);
   const rowIndex = (id) => rows.findIndex((r) => r.id === id);
-  /** Zustand B („Elternschreiben erstellen“): jede Zeile mit Namen hat einen passenden Code. */
+  /** Zustand B („Elternschreiben für diese Klasse erstellen“): jede Zeile mit Namen hat einen passenden Code. */
   const isReady = () => {
     const named = rows.filter(keepRow);
     return named.length > 0 && named.every(codeMatches);
@@ -258,11 +271,19 @@ export default function render(ctx) {
   const onVisibility = () => {
     if (document.visibilityState === 'hidden') flushSave();
   };
+  // Änderungen aus einem anderen Tab übernehmen (z. B. dort ergänzte Lernende oder Rückmeldungen)
+  const onStorage = (e) => {
+    if (deleted || e.key !== teacherStorageKey(state.teacher.teacherCode)) return;
+    if (saveTimer) persist();
+    else syncFromStorage();
+  };
   window.addEventListener('pagehide', onPageHide);
   document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('storage', onStorage);
   return () => {
     window.removeEventListener('pagehide', onPageHide);
     document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('storage', onStorage);
     if (!deleted) flushSave();
   };
 
@@ -391,7 +412,7 @@ export default function render(ctx) {
           ? 'Für neue oder geänderte Namen wird ein neuer Code erzeugt. Unveränderte Namen behalten ihren Code.'
           : 'Danach erzeugt ParentsDay für jedes Kind einen persönlichen Code.';
     intro.textContent = ready
-      ? 'Die Codes sind erzeugt. Erstellen Sie jetzt die Elternschreiben und geben Sie jedem Kind seinen Brief mit. Sobald die Eltern antworten, erscheinen ihre Zeiten in der Spalte „Verfügbarkeit der Eltern“.'
+      ? 'Die Codes sind erzeugt. Erstellen Sie jetzt die Elternbriefe und geben Sie jedem Kind seinen Brief mit. Sobald die Eltern antworten, erscheinen ihre Zeiten in der Spalte „Verfügbarkeit der Eltern“.'
       : 'Tragen Sie Nachname und Vorname aller Lernenden ein. Tipp: Eine Namensliste können Sie direkt aus Excel & Co. kopieren (Spalten Nachname und Vorname) und in ein Namensfeld einfügen.';
 
     scheduleBtn.disabled = !ready;
@@ -420,36 +441,120 @@ export default function render(ctx) {
     if (saveTimer) persist();
   }
 
-  /** Schreibt alle Zeilen (außer komplett leeren) in den Zustand. Rückmeldungen und Termine bleiben erhalten. */
+  function markDirty(...ids) {
+    for (const id of ids) {
+      dirty.add(id);
+      removed.delete(id);
+    }
+  }
+
+  /**
+   * Schreibt die in diesem Tab geänderten Zeilen in den Zustand (außer komplett leeren Zeilen).
+   * Unveränderte Zeilen behalten den gespeicherten Stand, Lernende aus einem anderen Tab bleiben
+   * erhalten, dort gelöschte bleiben gelöscht. Rückmeldungen und Termine bleiben immer erhalten.
+   */
   function persist() {
     clearTimeout(saveTimer);
     saveTimer = null;
     const keep = rows.filter(keepRow);
-    const ready = isReady();
+    const localIds = new Set(rows.map((r) => r.id));
+    let merged = null;
     try {
       state = updateState((s) => {
         const cls = findClass(s, classId);
-        if (!cls) return;
+        if (!cls) throw new Error(CLASS_GONE);
         const previous = new Map(cls.students.map((st) => [st.id, st]));
-        cls.students = keep.map((r) => {
+        const out = [];
+        for (const r of keep) {
           const prev = previous.get(r.id);
-          return {
+          if (!prev && loadedIds.has(r.id) && !dirty.has(r.id)) continue; // in einem anderen Tab gelöscht
+          if (prev && !dirty.has(r.id)) {
+            out.push(prev);
+            continue;
+          }
+          out.push({
             id: r.id,
             lastName: cleanName(r.lastName),
             firstName: cleanName(r.firstName),
             code: r.code,
             response: prev ? prev.response ?? null : r.response,
             appointment: prev ? prev.appointment ?? null : r.appointment,
-          };
-        });
-        cls.codesGenerated = ready;
+          });
+        }
+        // In einem anderen Tab ergänzte Lernende anhängen
+        for (const st of cls.students) if (!localIds.has(st.id) && !removed.has(st.id)) out.push(st);
+        cls.students = out;
+        cls.codesGenerated = out.length > 0 && out.every((st) => st.code && st.code === studentCode(grade, letter, s.teacher.teacherCode, st.firstName, st.lastName));
+        merged = out;
       });
-      return true;
     } catch (err) {
       console.error(err);
-      showFeedback(alertBox('error', `Die Änderungen konnten nicht gespeichert werden: ${err.message}`), 'error');
+      showFeedback(alertBox('error', h('strong', {}, 'Die Änderungen konnten nicht gespeichert werden. '), friendlyError(err)), 'error');
       return false;
     }
+    dirty.clear();
+    removed.clear();
+    loadedIds = new Set(merged.map((st) => st.id));
+    adoptStudents(merged);
+    return true;
+  }
+
+  /** Übernimmt gespeicherte Lernende in die Tabelle, wenn sie sich (durch einen anderen Tab) unterscheiden. */
+  function adoptStudents(students) {
+    const current = rows.filter(keepRow);
+    const sameIds = current.length === students.length && current.every((r, i) => r.id === students[i].id);
+    const local = new Map(rows.map((r) => [r.id, r]));
+    let changed = !sameIds;
+    const next = students.map((st) => {
+      const row = local.get(st.id);
+      if (!row) return rowFromStudent(st);
+      // Eigene Eingaben bleiben stehen (z. B. ein Leerzeichen am Ende beim Tippen) – nur fremde Änderungen übernehmen
+      if (cleanName(row.lastName) !== st.lastName || cleanName(row.firstName) !== st.firstName) {
+        row.lastName = st.lastName;
+        row.firstName = st.firstName;
+        changed = true;
+      }
+      if (row.code !== st.code || JSON.stringify(row.response) !== JSON.stringify(st.response) || JSON.stringify(row.appointment) !== JSON.stringify(st.appointment)) changed = true;
+      row.code = st.code;
+      row.response = st.response;
+      row.appointment = st.appointment;
+      return row;
+    });
+    if (!changed) return;
+    // Noch leere Zeilen (nur auf dieser Seite) bleiben am Ende stehen.
+    for (const r of rows) if (!keepRow(r) && !next.includes(r)) next.push(r);
+    rows = next.length ? next : [blankRow()];
+    rerenderKeepingFocus();
+    updateUi();
+  }
+
+  /** Stand aus dem Speicher übernehmen (nach Änderungen in einem anderen Tab). */
+  function syncFromStorage() {
+    const fresh = getCurrentState();
+    const cls = fresh && findClass(fresh, classId);
+    if (!cls) {
+      showFeedback(
+        alertBox('error', h('strong', {}, `Die Klasse ${classId} wurde inzwischen gelöscht`), ' (z. B. in einem anderen Fenster). Änderungen hier werden nicht mehr gespeichert. ', h('a', { href: '#/lehrkraft/klassen' }, 'Zur Klassenübersicht')),
+        'error',
+      );
+      return;
+    }
+    state = fresh;
+    loadedIds = new Set(cls.students.map((st) => st.id));
+    adoptStudents(cls.students);
+  }
+
+  /** Tabelle neu zeichnen, ohne dass das gerade bearbeitete Feld den Fokus verliert. */
+  function rerenderKeepingFocus() {
+    const active = document.activeElement;
+    const tr = active?.closest?.('tr[data-id]');
+    const focus = tr && tbody.contains(tr) ? { id: tr.dataset.id, testid: active.dataset.testid, start: active.selectionStart, end: active.selectionEnd } : null;
+    renderTable();
+    if (!focus) return;
+    const el = refs.get(focus.id)?.tr.querySelector(`[data-testid="${focus.testid}"]`);
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (typeof focus.start === 'number') el.setSelectionRange?.(focus.start, focus.end);
   }
 
   // ---------- Eingaben ----------
@@ -471,6 +576,7 @@ export default function render(ctx) {
     // Name wieder wie vorher → alter Code gilt wieder
     if (syncCode(row)) fillCode(row);
     if (feedbackKind === 'success') showFeedback(null);
+    markDirty(id);
     scheduleSave();
     updateUi();
   }
@@ -515,15 +621,16 @@ export default function render(ctx) {
       if (entry.lastName !== undefined) row.lastName = entry.lastName;
       if (entry.firstName !== undefined) row.firstName = entry.firstName;
       syncCode(row);
+      markDirty(row.id);
       idx += 1;
     }
     showFeedback(null);
     renderTable();
-    persist();
+    const saved = persist();
     updateUi();
     const lastRef = refs.get(rows[idx - 1].id);
     (field === 'lastName' ? lastRef?.last : lastRef?.first)?.focus();
-    toast(`${plural(entries.length, 'Name', 'Namen')} eingefügt.`, 'success');
+    if (saved) toast(`${plural(entries.length, 'Name', 'Namen')} eingefügt.`, 'success');
   }
 
   async function onDeleteRow(id) {
@@ -545,19 +652,21 @@ export default function render(ctx) {
     const idx = rowIndex(id);
     if (idx < 0) return;
     rows.splice(idx, 1);
+    dirty.delete(id);
+    removed.add(id);
     lastDeleteAt = Date.now();
     if (!rows.length) rows.push(blankRow());
     renderTable();
-    persist();
+    const saved = persist();
     updateUi();
-    // Gelöschte Zeile mit Daten kann wiederhergestellt werden
-    if (keepRow(row)) {
+    // Gelöschte Zeile mit Daten kann wiederhergestellt werden; bei einem Speicherfehler bleibt dessen Meldung stehen
+    if (saved && keepRow(row)) {
       const label = isBlank(row) ? 'Die Zeile wurde gelöscht.' : `„${displayName(row)}“ wurde gelöscht.`;
       showFeedback(
         alertBox('info', h('div', { class: 'cluster' }, h('span', {}, label), h('button', { type: 'button', class: 'btn btn-small btn-secondary', 'data-action': 'undo-delete', onclick: () => undoDelete(row, idx) }, 'Rückgängig machen'))),
         'undo',
       );
-    } else {
+    } else if (saved) {
       showFeedback(null);
     }
     const next = rows[Math.min(idx, rows.length - 1)];
@@ -571,12 +680,13 @@ export default function render(ctx) {
     // Einzelne leere Platzhalterzeile wird durch die wiederhergestellte Zeile ersetzt
     if (rows.length === 1 && !keepRow(rows[0])) rows = [];
     rows.splice(Math.min(idx, rows.length), 0, row);
+    markDirty(row.id);
     showFeedback(null);
     renderTable();
-    persist();
+    const saved = persist();
     updateUi();
     refs.get(row.id)?.last.focus();
-    toast(isBlank(row) ? 'Zeile wiederhergestellt.' : `„${displayName(row)}“ wiederhergestellt.`, 'success');
+    if (saved) toast(isBlank(row) ? 'Zeile wiederhergestellt.' : `„${displayName(row)}“ wiederhergestellt.`, 'success');
   }
 
   // ---------- Hauptknopf ----------
@@ -602,10 +712,12 @@ export default function render(ctx) {
     showFeedback(null);
     state = getCurrentState() || state;
     // Komplett leere Zeilen entfernen, Namen bereinigen
+    for (const r of rows) if (!keepRow(r) && loadedIds.has(r.id)) removed.add(r.id);
     rows = rows.filter(keepRow);
     for (const r of rows) {
       r.lastName = cleanName(r.lastName);
       r.firstName = cleanName(r.firstName);
+      markDirty(r.id);
     }
     if (!rows.length) {
       rows.push(blankRow());
@@ -680,12 +792,19 @@ export default function render(ctx) {
     }
     codesCreatedAt = Date.now();
     renderTable();
-    persist();
+    const saved = persist();
     updateUi();
+    if (!saved) return; // Fehlermeldung steht schon da
     const n = rows.length;
-    toast(n === 1 ? 'Code für 1 Lernende(n) erzeugt.' : `Codes für ${n} Lernende erzeugt.`, 'success');
-    showFeedback(alertBox('success', h('strong', {}, 'Die Codes sind erzeugt. '), 'Im nächsten Schritt erstellen Sie die Elternschreiben.'), 'success');
-    primaryBtn.focus();
+    showFeedback(
+      alertBox('success', h('strong', {}, n === 1 ? 'Code für 1 Lernende(n) erzeugt. ' : `Codes für ${n} Lernende erzeugt. `), 'Im nächsten Schritt erstellen Sie die Elternbriefe.'),
+      'success',
+    );
+    // Die Zeilen sind durch die Codes höher geworden: Meldung und nächsten Knopf ins Bild holen
+    // (focus() allein scrollt nicht, weil der Knopf schon fokussiert ist).
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    feedback.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
+    primaryBtn.focus({ preventScroll: true });
   }
 
   async function createLetters() {
@@ -696,16 +815,15 @@ export default function render(ctx) {
     try {
       const { createParentLettersPdf } = await import('../pdf/letters-pdf.js');
       const result = await createParentLettersPdf(getCurrentState(), classId);
-      const name = savePdf(result.doc, result.filename || `Elternschreiben Klasse ${classId}.pdf`);
+      const name = savePdf(result.doc, result.filename || `Elternbriefe Klasse ${classId}.pdf`);
       const pages = result.pageCount || rows.filter(keepRow).length;
-      toast(`Elternschreiben gespeichert: „${name}“`, 'success');
       showFeedback(
-        alertBox('success', h('strong', {}, 'Die Elternschreiben wurden erstellt. '), `Die Datei „${name}“ hat ${plural(pages, 'Seite', 'Seiten')} – eine pro Kind. Drucken Sie sie aus und geben Sie jedem Kind seinen Brief mit.`),
+        alertBox('success', h('strong', {}, 'Die Elternbriefe wurden erstellt. '), `Die Datei „${name}“ hat ${plural(pages, 'Seite', 'Seiten')} – eine pro Kind. Drucken Sie sie aus und geben Sie jedem Kind seinen Brief mit.`),
         'success',
       );
     } catch (err) {
       console.warn(err);
-      showFeedback(alertBox('error', h('strong', {}, 'Die Elternschreiben konnten nicht erstellt werden. '), err?.message || String(err)), 'error');
+      showFeedback(alertBox('error', h('strong', {}, 'Die Elternbriefe konnten nicht erstellt werden. '), friendlyError(err)), 'error');
     } finally {
       busy = false;
       primaryBtn.disabled = false;
@@ -722,6 +840,9 @@ export default function render(ctx) {
     if (!cls) return;
     state = fresh;
     rows = rowsFromClass(cls);
+    dirty.clear();
+    removed.clear();
+    loadedIds = new Set(cls.students.map((st) => st.id));
     renderTable();
     updateUi();
   }
@@ -747,7 +868,7 @@ export default function render(ctx) {
         s.classes = s.classes.filter((c) => c.id !== classId);
       });
     } catch (err) {
-      showFeedback(alertBox('error', `Die Klasse konnte nicht gelöscht werden: ${err.message}`), 'error');
+      showFeedback(alertBox('error', h('strong', {}, 'Die Klasse konnte nicht gelöscht werden. '), friendlyError(err)), 'error');
       return;
     }
     deleted = true;

@@ -88,6 +88,11 @@
 .tc-name {
   min-width: 170px;
 }
+/* Mit Code- und Verfügbarkeitsspalte bleiben die Namensfelder breit genug, um lange Namen zu prüfen;
+   der Code bricht dafür um. */
+.tc-with-avail .tc-name {
+  min-width: 16rem;
+}
 .tc-input {
   min-height: 40px;
   padding: 7px 10px;
@@ -101,16 +106,18 @@
   display: inline-block;
   font-size: 0.85rem;
   line-height: 1.4;
+  word-break: break-all;
 }
 .tc-code-empty {
   color: var(--c-muted);
 }
 .tc-with-avail .tc-code {
-  max-width: 210px;
+  min-width: 110px;
+  max-width: 150px;
 }
 .tc-avail {
   padding-top: 16px;
-  min-width: 240px;
+  min-width: 200px;
   font-size: 0.9rem;
 }
 .tc-avail-list {
@@ -276,6 +283,9 @@
   }
   .tc-with-avail .tc-code {
     max-width: none;
+  }
+  .tc-with-avail .tc-name {
+    min-width: 0;
   }
   .tc-table td[data-label]::before {
     content: attr(data-label);

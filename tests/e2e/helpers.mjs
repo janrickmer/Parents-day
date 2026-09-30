@@ -20,7 +20,7 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-/** Startet einen statischen Webserver für das Projekt. */
+/** Startet einen statischen Webserver für das Projekt. Unbekannte Pfade liefern wie GitHub Pages die 404.html. */
 export async function startServer() {
   const server = http.createServer(async (req, res) => {
     try {
@@ -33,8 +33,9 @@ export async function startServer() {
       res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
       res.end(data);
     } catch {
-      res.writeHead(404);
-      res.end('not found');
+      const page = await fs.readFile(path.join(ROOT, '404.html')).catch(() => null);
+      res.writeHead(404, page ? { 'content-type': TYPES['.html'] } : {});
+      res.end(page || 'not found');
     }
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));

@@ -1,12 +1,14 @@
 // Zugang für Lehrkräfte: Auswahl (Registrieren/Anmelden), Registrierung mit PDF-Download und
 // Anmeldung per Registrierungs-PDF oder per Eingabe von Name, Geburtsdatum und Registrierungscode.
 
-import { h, mount, toast, field, alertBox, fileDropZone } from '../core/ui.js';
+import { MAX_REGISTRATION_BYTES, NAME_MAX_LENGTH } from '../config.js';
+import { h, mount, toast, field, alertBox, fileDropZone, friendlyError } from '../core/ui.js';
 import { cleanName, initialOf, isValidIsoDate, registrationCode, teacherCode, codesEqual, normalizeCodeInput, isValidEmail, isSameTeacher } from '../core/codes.js';
 import { formatDate, todayIso } from '../core/time.js';
-import { getSession, setSession, clearSession, loadTeacherState, createTeacherState, saveTeacherState, updateState } from '../core/storage.js';
+import { getSession, setSession, clearSession, loadTeacherState, createTeacherState, saveTeacherState, updateState, takeReturnTo } from '../core/storage.js';
 import { savePdf, extractPayloadFromFile, preloadPdf } from '../core/pdf.js';
 import { createRegistrationPdf } from '../pdf/registration-pdf.js';
+import { markEmptyDevice } from '../components/backup-actions.js';
 
 const MIN_BIRTH_DATE = '1900-01-01';
 const NOT_REGISTRATION = 'Diese Datei ist keine ParentsDay-Registrierung.';
@@ -14,12 +16,8 @@ const INVALID_REGISTRATION = 'Die Daten in der Datei sind ungültig.';
 const CODE_MISMATCH = 'Die Angaben passen nicht zum Registrierungscode. Bitte prüfen Sie Namen, Geburtsdatum und Code.';
 const CODE_COLLISION =
   'In diesem Browser sind bereits Daten einer anderen Lehrkraft mit demselben Lehrkräftecode gespeichert (gleiche Anfangsbuchstaben und gleiches Geburtsdatum). Zum Schutz dieser Daten nutzen Sie ParentsDay bitte in einem anderen Browser oder Browserprofil.';
-const EMPTY_DEVICE_HINT = 'Auf diesem Gerät sind noch keine Daten gespeichert. Falls Sie einen Zwischenstand haben, laden Sie ihn oben über „Zwischenstand laden“.';
 const BACKUP_NOT_LOGIN =
   'Diese Datei ist ein Zwischenstand, keine Registrierungs-PDF. Bitte melden Sie sich zuerst an – mit Ihrer Registrierungs-PDF oder mit Ihren Daten. Danach können Sie den Zwischenstand oben über „Zwischenstand laden“ öffnen.';
-// Registrierungs-PDFs sind etwa 70 KB groß – viel größere Dateien gar nicht erst einlesen.
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-const NAME_MAX_LENGTH = 80;
 
 export default function render(ctx) {
   const mode = ctx.params?.mode;
@@ -33,6 +31,11 @@ export default function render(ctx) {
 /** Erste Seite nach der Anmeldung: ohne Elternsprechtag dessen Einrichtung, sonst die Klassen. */
 function homePath(state) {
   return state?.event ? '/lehrkraft/klassen' : '/lehrkraft/elternsprechtag';
+}
+
+/** Ziel nach der Anmeldung: die zuvor direkt aufgerufene Lehrkraft-Seite, sonst die Startseite der Lehrkraft. */
+function afterLoginPath(state) {
+  return takeReturnTo() || homePath(state);
 }
 
 function fullName(teacher) {
@@ -302,6 +305,7 @@ function renderRegister(ctx) {
         { class: 'page-header' },
         h('div', {}, h('h1', {}, 'Registrieren'), h('p', { class: 'subtitle' }, 'Tragen Sie Ihre Daten ein. Danach erhalten Sie eine PDF-Datei mit Ihrem Registrierungscode.')),
       ),
+      sessionBanner(ctx),
       h('div', { class: 'card' }, form),
       privacyNote(),
       h('p', { class: 'tauth-alt small' }, 'Sie haben sich schon registriert? ', h('a', { href: '#/lehrkraft/anmelden' }, 'Hier anmelden')),
@@ -357,9 +361,11 @@ function renderRegister(ctx) {
         state = createTeacherState(teacher);
       }
       saveTeacherState(state);
+      // Gleich angemeldet: Neuladen oder „Zurück“ auf der Erfolgsseite führt nicht zu einem leeren Formular.
+      setSession(teacher.teacherCode);
     } catch (err) {
       setBusy(submit, false);
-      mount(status, alertBox('error', 'Die Registrierung konnte nicht gespeichert werden. ', err.message || ''));
+      mount(status, alertBox('error', 'Die Registrierung konnte nicht gespeichert werden. ', friendlyError(err)));
       return;
     }
 
@@ -370,7 +376,7 @@ function renderRegister(ctx) {
       savePdf(pdf.doc, pdf.filename);
     } catch (err) {
       pdf = null;
-      pdfError = err?.message || String(err);
+      pdfError = friendlyError(err);
     }
     // Seite inzwischen verlassen? Dann nicht mehr in die alte Ansicht zeichnen.
     if (!root.isConnected) return;
@@ -409,13 +415,13 @@ function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed }) {
       showDownload(true);
     } catch (err) {
       setBusy(downloadBtn, false);
-      showDownload(false, err?.message || String(err));
+      showDownload(false, friendlyError(err));
     }
   }
 
   const onContinue = () => {
     setSession(teacher.teacherCode);
-    navigate(homePath(loadTeacherState(teacher.teacherCode) || state));
+    navigate(afterLoginPath(loadTeacherState(teacher.teacherCode) || state));
   };
 
   const codeBox = (label, code, testId, hint, big) =>
@@ -506,7 +512,7 @@ function renderLogin(ctx) {
       mount(uploadStatus);
       completeLogin(ctx, data);
     } catch (err) {
-      mount(uploadStatus, alertBox('error', h('p', {}, err.message || NOT_REGISTRATION)));
+      mount(uploadStatus, alertBox('error', h('p', {}, friendlyError(err, NOT_REGISTRATION))));
     } finally {
       uploading = false;
     }
@@ -563,7 +569,7 @@ function renderLogin(ctx) {
     try {
       completeLogin(ctx, { firstName: values.firstName, lastName: values.lastName, birthDate: values.birthDate, email: '' }, { typed: true });
     } catch (err) {
-      mount(formStatus, alertBox('error', h('p', {}, 'Die Anmeldung hat nicht geklappt. ', err?.message || '')));
+      mount(formStatus, alertBox('error', h('p', {}, 'Die Anmeldung hat nicht geklappt. ', friendlyError(err))));
     }
   }
 
@@ -613,7 +619,7 @@ function renderLogin(ctx) {
  */
 async function readRegistrationFile(file) {
   const notRegistration = new Error(`${NOT_REGISTRATION} Bitte wählen Sie die Datei „ParentsDay Registrierung …“, die Sie bei der Registrierung erhalten haben.`);
-  if (file.size > MAX_UPLOAD_BYTES) throw notRegistration;
+  if (file.size > MAX_REGISTRATION_BYTES) throw notRegistration;
   let payload = null;
   try {
     payload = await extractPayloadFromFile(file);
@@ -628,6 +634,8 @@ async function readRegistrationFile(file) {
     birthDate: String(payload.birthDate || ''),
     email: String(payload.email || '').trim(),
   };
+  // Die Adresse landet später im Elternbrief-Link und in mailto-Links – nur gültige Adressen übernehmen.
+  if (!isValidEmail(data.email)) data.email = '';
   let valid = false;
   try {
     valid = Boolean(initialOf(data.firstName) && initialOf(data.lastName) && isValidIsoDate(data.birthDate)) && codesEqual(registrationCode(data.firstName, data.lastName, data.birthDate), payload.registrationCode);
@@ -672,6 +680,7 @@ function completeLogin(ctx, { firstName, lastName, birthDate, email }, { typed =
     });
   }
   toast(`Willkommen, ${fullName(state.teacher)}!`, 'success');
-  if (created) toast(EMPTY_DEVICE_HINT, 'info', 12000);
-  ctx.navigate(homePath(state));
+  // Neues Gerät: „Elternsprechtag erstellen“ zeigt einen dauerhaften Hinweis mit „Zwischenstand laden“.
+  markEmptyDevice(code, created);
+  ctx.navigate(afterLoginPath(state));
 }
