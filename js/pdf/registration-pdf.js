@@ -2,7 +2,7 @@
 // Die Daten stehen zusätzlich maschinenlesbar in den PDF-Metadaten, damit die Anmeldung per Datei-Upload klappt.
 
 import { PUBLIC_URL, APP_NAME } from '../config.js';
-import { createPdf, drawBrandHeader, writeParagraph, drawInfoBox, drawFooters, embedPayload, setText, lineHeight, PAGE, CONTENT_WIDTH, COLORS } from '../core/pdf.js';
+import { createPdf, drawBrandHeader, writeParagraph, drawInfoBox, drawFooters, embedPayload, ensureSpace, setText, lineHeight, PAGE, CONTENT_WIDTH, COLORS } from '../core/pdf.js';
 import { registrationCode, teacherCode } from '../core/codes.js';
 import { formatDate, nowParts } from '../core/time.js';
 import { mailboxEnabled } from '../core/mailbox.js';
@@ -160,15 +160,15 @@ export async function createRegistrationPdf(teacher) {
   y = writeStep(doc, 2, 'Laden Sie diese PDF-Datei hoch – oder geben Sie Vorname, Nachname, Geburtsdatum und Registrierungscode ein.', y);
   y += 4;
 
+  const note = mailboxEnabled()
+    ? `${APP_NAME} speichert Ihre Daten in Ihrem Browser und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung. An einem neuen Gerät melden Sie sich an und geben das Passwort ein; dann ist Ihr aktueller Stand da. Ihr Passwort steht aus Sicherheitsgründen nicht in diesem Dokument. Ohne es lässt sich die Cloud-Sicherung nicht öffnen – auch nicht von ${APP_NAME}.`
+    : `${APP_NAME} speichert Ihre Daten nur in dem Browser, mit dem Sie arbeiten – nicht auf einem Server. Möchten Sie an einem anderen Gerät weiterarbeiten, speichern Sie über „Zwischenstand speichern“ eine Datei und laden Sie diese dort nach der Anmeldung über „Zwischenstand laden“.`;
+  // Lange Namen oder E-Mail-Adressen: „Gut zu wissen“ notfalls auf die zweite Seite, statt in die Fußzeile zu laufen.
+  setText(doc, { size: 11 });
+  const noteHeight = doc.splitTextToSize(note, CONTENT_WIDTH).length * lineHeight(doc, 11);
+  y = ensureSpace(doc, y, lineHeight(doc, 14) + 2.5 + noteHeight + 4 + lineHeight(doc, 11));
   y = writeParagraph(doc, 'Gut zu wissen', y, { size: 14, bold: true, color: COLORS.primary, spacingAfter: 2.5 });
-  y = writeParagraph(
-    doc,
-    mailboxEnabled()
-      ? `${APP_NAME} speichert Ihre Daten in Ihrem Browser und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung. An einem neuen Gerät melden Sie sich an und geben das Passwort ein; dann ist Ihr aktueller Stand da. Ihr Passwort steht aus Sicherheitsgründen nicht in diesem Dokument. Ohne es lässt sich die Cloud-Sicherung nicht öffnen – auch nicht von ${APP_NAME}.`
-      : `${APP_NAME} speichert Ihre Daten nur in dem Browser, mit dem Sie arbeiten – nicht auf einem Server. Möchten Sie an einem anderen Gerät weiterarbeiten, speichern Sie über „Zwischenstand speichern“ eine Datei und laden Sie diese dort nach der Anmeldung über „Zwischenstand laden“.`,
-    y,
-    { spacingAfter: 4 },
-  );
+  y = writeParagraph(doc, note, y, { spacingAfter: 4 });
   writeParagraph(doc, 'Bitte bewahren Sie dieses Dokument vertraulich auf.', y, { bold: true, spacingAfter: 0 });
 
   drawFooters(doc);

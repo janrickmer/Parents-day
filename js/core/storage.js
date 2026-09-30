@@ -412,17 +412,37 @@ export function loadEventDraft(state) {
   }
 }
 
+const draftStoreListeners = new Set();
+
+/** Beobachter für gespeicherte bzw. gelöschte Entwürfe (Cloud-Sicherung). Gibt eine Abmelde-Funktion zurück. */
+export function onEventDraftStored(fn) {
+  draftStoreListeners.add(fn);
+  return () => draftStoreListeners.delete(fn);
+}
+
+function notifyDraftStored(state) {
+  for (const fn of draftStoreListeners) {
+    try {
+      fn(state);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+}
+
 export function storeEventDraft(state, draft) {
   try {
     storageSet(localStorage, DRAFT_PREFIX + state.teacher.teacherCode, JSON.stringify({ base: eventDraftBase(state), draft }));
   } catch {
     // Speicher nicht verfügbar – dann gehen ungespeicherte Eingaben beim Neuladen verloren.
   }
+  notifyDraftStored(state);
 }
 
 export function clearEventDraft(state) {
   storageRemove(localStorage, DRAFT_PREFIX + state.teacher.teacherCode);
   storageRemove(sessionStorage, DRAFT_PREFIX + state.teacher.teacherCode); // Entwürfe älterer Fassungen
+  notifyDraftStored(state);
 }
 
 /** Meldet, ob auf der aktuellen Seite ungespeicherte Eingaben stehen (für die Anzeige in der Kopfzeile). */

@@ -6,7 +6,8 @@
 //
 // Einrichtung: siehe docs/BRIEFKASTEN.md. Benötigt wird die D1-Bindung `DB`.
 // Optionale Variablen: ALLOWED_ORIGINS – erlaubte Web-Adressen, kommagetrennt
-// (Standard: https://parentsday.janrickmer.de); POSTS_PER_MINUTE – Rückmeldungen je IP und Minute (Standard 30).
+// (Standard: https://parentsday.janrickmer.de); POSTS_PER_MINUTE – Rückmeldungen je IP und Minute (Standard 30);
+// IP_HASH_KEY (als Secret) – Schlüssel für die pseudonymen Hashwerte der IP-Adressen (sonst ein täglicher Zufallswert).
 // Aufräumen: Ein täglicher Cron-Trigger (scheduled) löscht Rückmeldungen und Verzeichniseinträge, bevor sie
 // 200 Tage alt sind. Ältere gibt der Dienst auch ohne Cron-Trigger nicht mehr heraus. Cloud-Sicherungen, die
 // 400 Tage weder geändert noch abgerufen wurden, löscht er ebenfalls.
@@ -23,25 +24,27 @@
 // (die Lehrkraft), kann den Briefkasten lesen oder leeren.
 //
 // Cloud-Sicherung (kompletter Stand der Lehrkraft, im Browser mit ihrem Passwort verschlüsselt, js/core/cloud.js).
-// ID, Schlüssel und Tokens entstehen im Browser aus Passwort, Name und Geburtsdatum – ohne das Passwort lässt sich
-// eine Sicherung weder finden noch öffnen, überschreiben oder löschen.
+// Adresse (syncId), Schlüssel und Tokens entstehen im Browser aus Passwort, Name und Geburtsdatum – ohne das Passwort
+// lässt sich eine Sicherung weder finden noch öffnen, überschreiben oder löschen. who ist ein Hashwert aus Name und
+// Geburtsdatum; gespeichert wird eine Sicherung unter SHA-256(who|syncId) – who selbst steht nicht in der Datenbank.
 //   POST   /v1/sync/<syncId>/open          Sicherung auf einem Gerät öffnen: Bearer <token>, { who, device }
 //                                          → { found:false } oder { found:true, version, updatedAt, iv, ct, z }
-//                                          who: Kennung der Lehrkraft (nur zum Zählen der Versuche);
 //                                          device: SHA-256 eines zufälligen Geräte-Geheimnisses – das Gerät darf
 //                                          danach abgleichen
-//   GET    /v1/sync/<syncId>[?since=<v>]   Stand abrufen (Bearer <token>, X-Device: <Geräte-Geheimnis>)
+//   GET    /v1/sync/<syncId>[?since=<v>]   Stand abrufen (Bearer <token>, X-Who, X-Device: <Geräte-Geheimnis>)
 //                                          mit since und unveränderter Version nur { …, unchanged:true }
 //   PUT    /v1/sync/<syncId>               neu anlegen: { baseVersion:0, who, authHash, adminHash, device, iv, ct, z }
 //                                          (Bearer <token>); ändern: { baseVersion, iv, ct, z } (Bearer <token>,
-//                                          X-Device) → { version, updatedAt }; 409, wenn es sie schon gibt bzw.
-//                                          sie inzwischen geändert wurde
-//   DELETE /v1/sync/<syncId>               löschen (Bearer <adminToken>, X-Device)
-// Versuche, eine Sicherung zu öffnen oder anzulegen, werden je Lehrkraft gezählt: höchstens 10 je Stunde und
-// IP-Adresse und 30 am Tag insgesamt – so lässt sich ein Passwort nicht durch Ausprobieren finden. Abgleichen
-// von einem eingetragenen Gerät zählt nicht. Abrufen, Speichern und Löschen antworten bei jedem Fehler gleich
-// (403) – ohne Passwort ist nicht zu erkennen, ob es eine Sicherung gibt.
-// Zum Zählen wird statt der IP-Adresse ein Hashwert mit täglich neuem Zufallswert gespeichert (höchstens 2 Tage).
+//                                          X-Who, X-Device) → { version, updatedAt }; 409, wenn es sie schon gibt
+//                                          bzw. sie inzwischen geändert wurde
+//   DELETE /v1/sync/<syncId>               löschen (Bearer <adminToken>, X-Who, X-Device)
+// Versuche, eine Sicherung zu öffnen oder anzulegen, werden je Lehrkraft (who) gezählt: höchstens 10 je Stunde und
+// Anschluss und 30 am Tag insgesamt – so lässt sich ein Passwort nicht durch Ausprobieren finden. Erfolgreiches
+// Öffnen zählt nicht, Anlegen immer. Abgleichen von einem eingetragenen Gerät zählt nie. Abrufen, Speichern und
+// Löschen antworten bei jedem Fehler gleich (403) – ohne Passwort ist nicht zu erkennen, ob es eine Sicherung gibt.
+// Zum Zählen wird statt der IP-Adresse ein pseudonymer Hashwert gespeichert (HMAC mit IP_HASH_KEY bzw. täglich
+// neuem Zufallswert), nach spätestens 2 Tagen gelöscht. Sicherungen, die nach dem Anlegen nie geändert oder
+// abgerufen wurden, werden nach 30 Tagen gelöscht, alle anderen nach 400 Tagen ohne Nutzung.
 
 const DEFAULT_ORIGINS = ['https://parentsday.janrickmer.de'];
 const ID_RE = /^[A-Za-z0-9_-]{32}$/;
@@ -61,11 +64,13 @@ const SYNC_CHUNK_CHARS = 90000; // je Datenbankzeile – bleibt unter der Grenze
 const SYNC_MAX_CT_CHARS = 8 * SYNC_CHUNK_CHARS; // ≈ 540 KB verschlüsselt und komprimiert – reicht für sehr viele Klassen
 const SYNC_MAX_BODY_BYTES = SYNC_MAX_CT_CHARS + 4096;
 const SYNC_MAX_TOTAL_CHARS = 250 * 1000 * 1000; // alle Sicherungen zusammen (die Datenbank fasst im kostenlosen Tarif 500 MB)
-const SYNC_MAX_DEVICES = 20; // eingetragene Geräte je Sicherung (die ältesten fallen heraus)
-const OPEN_PER_HOUR_PER_IP = 10; // Versuche je Lehrkraft, Stunde und IP-Adresse
-const OPEN_PER_DAY = 30; // Versuche je Lehrkraft und Tag insgesamt
-const CREATES_PER_DAY_PER_IP = 20; // neue Sicherungen je IP-Adresse und Tag (Schulen teilen sich oft eine Adresse)
+const SYNC_MAX_DEVICES = 20; // eingetragene Geräte je Sicherung (die am längsten nicht geöffneten fallen heraus)
+const OPEN_PER_HOUR_PER_IP = 10; // Fehlversuche je Lehrkraft, Stunde und Anschluss
+const OPEN_PER_DAY = 30; // Fehlversuche je Lehrkraft und Tag insgesamt
+const CREATES_PER_DAY_PER_IP = 20; // neue Sicherungen je Anschluss und Tag (Schulen teilen sich oft eine Adresse)
+const CREATE_CHARS_PER_DAY_PER_IP = 5 * 1000 * 1000; // Umfang neuer Sicherungen je Anschluss und Tag
 const SYNC_RETENTION_MS = 400 * DAY_MS; // ohne Änderung oder Abruf
+const UNUSED_RETENTION_MS = 30 * DAY_MS; // nach dem Anlegen nie geändert oder abgerufen
 const LIMIT_RETENTION_MS = 2 * DAY_MS;
 const SYNC_WRITES_PER_MINUTE = 120; // je IP-Adresse und Worker-Instanz
 
@@ -82,10 +87,13 @@ function ensureSchema(db) {
         db.prepare('CREATE TABLE IF NOT EXISTS directory (dir_id TEXT PRIMARY KEY, box_id TEXT NOT NULL, updated_at INTEGER NOT NULL, body TEXT NOT NULL)'),
         db.prepare('CREATE INDEX IF NOT EXISTS idx_directory_updated ON directory (updated_at)'),
         db.prepare(
-          'CREATE TABLE IF NOT EXISTS cloud (sync_id TEXT PRIMARY KEY, who TEXT NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, seen_at INTEGER NOT NULL, auth_hash TEXT NOT NULL, admin_hash TEXT NOT NULL, devices TEXT NOT NULL, iv TEXT NOT NULL, z INTEGER NOT NULL, chunks INTEGER NOT NULL, writer TEXT NOT NULL)',
+          'CREATE TABLE IF NOT EXISTS cloud (id TEXT PRIMARY KEY, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, seen_at INTEGER NOT NULL, auth_hash TEXT NOT NULL, admin_hash TEXT NOT NULL, devices TEXT NOT NULL, iv TEXT NOT NULL, z INTEGER NOT NULL, chunks INTEGER NOT NULL, size INTEGER NOT NULL, writer TEXT NOT NULL)',
         ),
         db.prepare('CREATE INDEX IF NOT EXISTS idx_cloud_seen ON cloud (seen_at)'),
-        db.prepare('CREATE TABLE IF NOT EXISTS cloud_chunks (sync_id TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (sync_id, idx))'),
+        db.prepare('CREATE TABLE IF NOT EXISTS cloud_chunks (cloud_id TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (cloud_id, idx))'),
+        // Tabellen einer Vorabfassung der Cloud-Sicherung (nie im Einsatz) entfernen
+        db.prepare('DROP TABLE IF EXISTS sync_chunks'),
+        db.prepare('DROP TABLE IF EXISTS sync'),
         db.prepare('CREATE TABLE IF NOT EXISTS cloud_limits (key TEXT PRIMARY KEY, win INTEGER NOT NULL, n INTEGER NOT NULL)'),
         db.prepare('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, day INTEGER NOT NULL)'),
       ])
@@ -110,7 +118,7 @@ function corsHeaders(request, env) {
   const origin = request.headers.get('Origin');
   const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device, X-Who',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
@@ -211,8 +219,8 @@ async function postMessage(request, env, db, boxId) {
 /**
  * Löscht Rückmeldungen und Verzeichniseinträge, die bald 200 Tage alt sind. Der Cron-Trigger läuft einmal
  * am Tag – mit einem Tag Vorlauf liegt so nichts länger als 200 Tage in der Datenbank.
- * Cloud-Sicherungen werden gelöscht, wenn sie 400 Tage weder geändert noch abgerufen wurden; Zähler für
- * Versuche nach 2 Tagen.
+ * Cloud-Sicherungen werden gelöscht, wenn sie 400 Tage weder geändert noch abgerufen wurden – oder schon nach
+ * 30 Tagen, wenn sie nach dem Anlegen nie geändert oder abgerufen wurden (z. B. Müll von Fremden); Zähler nach 2 Tagen.
  */
 async function removeExpired(db, now = Date.now()) {
   const limit = now - (RETENTION_MS - DAY_MS);
@@ -220,8 +228,8 @@ async function removeExpired(db, now = Date.now()) {
   const [messages, directory, cloud] = await db.batch([
     db.prepare('DELETE FROM messages WHERE created_at < ?').bind(limit),
     db.prepare('DELETE FROM directory WHERE updated_at < ?').bind(limit),
-    db.prepare('DELETE FROM cloud WHERE seen_at < ?').bind(syncLimit),
-    db.prepare('DELETE FROM cloud_chunks WHERE sync_id NOT IN (SELECT sync_id FROM cloud)'),
+    db.prepare('DELETE FROM cloud WHERE seen_at < ? OR (version = 1 AND seen_at < ?)').bind(syncLimit, now - UNUSED_RETENTION_MS),
+    db.prepare('DELETE FROM cloud_chunks WHERE cloud_id NOT IN (SELECT id FROM cloud)'),
     db.prepare('DELETE FROM cloud_limits WHERE win < ?').bind(now - LIMIT_RETENTION_MS),
   ]);
   return { messages: Number(messages?.meta?.changes ?? 0), directory: Number(directory?.meta?.changes ?? 0), sync: Number(cloud?.meta?.changes ?? 0) };
@@ -250,6 +258,7 @@ async function clearMessages(request, env, db, boxId) {
 }
 
 async function putDirectory(request, env, db, dirId) {
+  if (tooManyPosts(request, env)) return json(request, env, 429, { error: 'too-many-requests' });
   const body = await readJson(request, MAX_DIRECTORY_BYTES);
   if (!body || !ID_RE.test(String(body.box || '')) || !isB64(body.iv, 16, 16) || !isB64(body.ct, 24, MAX_DIRECTORY_BYTES)) {
     return json(request, env, 400, { error: 'invalid-entry' });
@@ -287,75 +296,104 @@ function randomB64(bytes) {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/** IPv6: die ersten 64 Bit (ein Anschluss hat meist ein ganzes /64-Netz), IPv4 unverändert. */
-function network(ip) {
+/**
+ * Netz der IP-Adresse: IPv4 unverändert, IPv6 die ersten `groups` Gruppen (4 = /64 – ein Anschluss hat meist ein
+ * ganzes /64-Netz; 3 = /48 – so viel bekommt ein Kunde höchstens).
+ */
+function network(ip, groups = 4) {
   if (!ip.includes(':')) return ip;
   const [head, tail = ''] = ip.toLowerCase().split('::');
   const h = head ? head.split(':') : [];
   const t = tail ? tail.split(':') : [];
   const full = ip.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h;
   return full
-    .slice(0, 4)
+    .slice(0, groups)
     .map((part) => part.replace(/^0+(?=.)/, ''))
     .join(':');
 }
 
 let ipSalt = null; // { day, value } – je Worker-Instanz zwischengespeichert
+let ipHmac = null; // { secret, key }
 
-/**
- * Hashwert der IP-Adresse (bzw. des IPv6-Netzes) mit täglich neuem Zufallswert: Er taugt zum Zählen von
- * Versuchen, lässt sich aber nicht auf die Adresse zurückführen und ist am nächsten Tag ein anderer.
- */
-async function ipKey(request, db) {
-  const day = Math.floor(Date.now() / DAY_MS);
-  if (ipSalt?.day !== day) {
-    const read = () => db.prepare("SELECT value, day FROM meta WHERE key = 'ip-salt'").first();
-    let row = await read();
-    if (!row || Number(row.day) !== day) {
-      await db
-        .prepare("INSERT INTO meta (key, value, day) VALUES ('ip-salt', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, day = excluded.day WHERE meta.day <> excluded.day")
-        .bind(randomB64(24), day)
-        .run();
-      row = await read();
-    }
-    ipSalt = { day, value: row.value };
+async function dailySalt(db, day) {
+  if (ipSalt?.day === day) return ipSalt.value;
+  const read = () => db.prepare("SELECT value, day FROM meta WHERE key = 'ip-salt'").first();
+  let row = await read();
+  if (!row || Number(row.day) !== day) {
+    await db
+      .prepare("INSERT INTO meta (key, value, day) VALUES ('ip-salt', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, day = excluded.day WHERE meta.day <> excluded.day")
+      .bind(randomB64(24), day)
+      .run();
+    row = await read();
   }
-  return (await sha256B64(`${ipSalt.value}|${network(request.headers.get('CF-Connecting-IP') || 'unbekannt')}`)).slice(0, 22);
+  ipSalt = { day, value: row.value };
+  return row.value;
 }
 
-/** Zählt einen Versuch atomar (UPSERT … RETURNING) und liefert den neuen Stand des Zählers. */
-function countStatement(db, key, win) {
+/**
+ * Pseudonymer Hashwert der IP-Adresse (bzw. ihres Netzes) zum Zählen von Versuchen – er wechselt täglich.
+ * Mit dem Secret IP_HASH_KEY: HMAC-SHA256 (der Schlüssel steht nicht in der Datenbank); sonst SHA-256 mit einem
+ * täglich neuen Zufallswert aus der Tabelle meta.
+ */
+async function ipKey(request, env, db, { groups = 4 } = {}) {
+  const day = Math.floor(Date.now() / DAY_MS);
+  const net = network(request.headers.get('CF-Connecting-IP') || 'unbekannt', groups);
+  if (env.IP_HASH_KEY) {
+    if (ipHmac?.secret !== env.IP_HASH_KEY) {
+      ipHmac = { secret: env.IP_HASH_KEY, key: await crypto.subtle.importKey('raw', new TextEncoder().encode(env.IP_HASH_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']) };
+    }
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', ipHmac.key, new TextEncoder().encode(`${day}|${net}`)));
+    let bin = '';
+    for (const b of mac) bin += String.fromCharCode(b);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 22);
+  }
+  return (await sha256B64(`${await dailySalt(db, day)}|${net}`)).slice(0, 22);
+}
+
+/** Erhöht einen Zähler atomar (UPSERT … RETURNING) um `amount` und liefert den neuen Stand. */
+function countStatement(db, key, win, amount = 1) {
   return db
-    .prepare('INSERT INTO cloud_limits (key, win, n) VALUES (?, ?, 1) ON CONFLICT(key) DO UPDATE SET n = CASE WHEN cloud_limits.win = excluded.win THEN cloud_limits.n + 1 ELSE 1 END, win = excluded.win RETURNING n')
-    .bind(key, win);
+    .prepare(
+      'INSERT INTO cloud_limits (key, win, n) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET n = CASE WHEN cloud_limits.win = excluded.win THEN cloud_limits.n + excluded.n ELSE excluded.n END, win = excluded.win RETURNING n',
+    )
+    .bind(key, win, amount);
+}
+
+function uncountStatement(db, key, win, amount = 1) {
+  return db.prepare('UPDATE cloud_limits SET n = MAX(n - ?, 0) WHERE key = ? AND win = ?').bind(amount, key, win);
 }
 
 const secondsUntil = (ms) => Math.max(1, Math.ceil((ms - Date.now()) / 1000));
 
 /**
- * Reserviert einen Versuch, eine Sicherung zu öffnen oder anzulegen (je Lehrkraft, Stunde und IP-Adresse sowie je
+ * Reserviert einen Versuch, eine Sicherung zu öffnen oder anzulegen (je Lehrkraft, Stunde und Anschluss sowie je
  * Lehrkraft und Tag). Der Zähler wird VOR der Prüfung erhöht – auch viele gleichzeitige Anfragen kommen so nicht
- * über die Grenze. Hat der Versuch geklappt, gibt release() ihn zurück: Nur Fehlversuche zählen.
+ * über die Grenze. Abgewiesene Versuche werden zurückgegeben (ein einzelner Anschluss kann so nicht das
+ * Tageskontingent aufbrauchen), ebenso erfolgreiches Öffnen (release).
  */
-async function reserveAttempt(request, db, who) {
+async function reserveAttempt(request, env, db, who) {
   const now = Date.now();
   const hour = Math.floor(now / HOUR_MS) * HOUR_MS;
   const day = Math.floor(now / DAY_MS) * DAY_MS;
-  const ip = await ipKey(request, db);
+  const ip = await ipKey(request, env, db);
   const limits = [
     { key: `o|${who}|${ip}`, win: hour, max: OPEN_PER_HOUR_PER_IP, until: hour + HOUR_MS },
     { key: `o|${who}`, win: day, max: OPEN_PER_DAY, until: day + DAY_MS },
   ];
   const results = await db.batch(limits.map((l) => countStatement(db, l.key, l.win)));
   const exceeded = limits.find((l, i) => Number(results[i]?.results?.[0]?.n ?? Infinity) > l.max);
-  const release = () => db.batch(limits.map((l) => db.prepare('UPDATE cloud_limits SET n = MAX(n - 1, 0) WHERE key = ? AND win = ?').bind(l.key, l.win)));
-  // Abgewiesene Versuche zählen nicht weiter – sonst könnte ein einzelner Anschluss das Tageskontingent aufbrauchen.
+  const release = () => db.batch(limits.map((l) => uncountStatement(db, l.key, l.win)));
   if (exceeded) await release();
-  return { ip, exceeded: exceeded ? { error: 'locked', retryAfter: secondsUntil(exceeded.until) } : null, release };
+  return { exceeded: exceeded ? { error: 'locked', retryAfter: secondsUntil(exceeded.until) } : null, release };
 }
 
-function getCloudRow(db, syncId) {
-  return db.prepare('SELECT who, version, updated_at, seen_at, auth_hash, admin_hash, devices, chunks FROM cloud WHERE sync_id = ?').bind(syncId).first();
+/** Schlüssel der Zeile: Die Sicherung gehört zur Lehrkraft (who) – mit einem anderen who ist sie nicht zu erreichen. */
+async function cloudRowId(who, syncId) {
+  return sha256B64(`cloud|${who}|${syncId}`);
+}
+
+function getCloudRow(db, id) {
+  return db.prepare('SELECT version, updated_at, seen_at, auth_hash, admin_hash, devices, chunks FROM cloud WHERE id = ?').bind(id).first();
 }
 
 function parseDevices(text) {
@@ -371,17 +409,24 @@ function validSyncData(body) {
   return Boolean(body) && isB64(body.iv, 16, 16) && isB64(body.ct, 24, SYNC_MAX_CT_CHARS) && (body.z === 0 || body.z === 1);
 }
 
+async function tokenMatchesHash(request, hash) {
+  const token = bearer(request);
+  return Boolean(token) && sameText(await sha256B64(token), hash);
+}
+
 /**
- * Prüft Token (bzw. Admin-Token) und eingetragenes Gerät. Gibt die Zeile zurück oder null – dann antwortet der
- * Dienst mit 403, gleich ob es die Sicherung gibt oder nicht.
+ * Prüft Lehrkraft (X-Who), Token (bzw. Admin-Token) und eingetragenes Gerät (X-Device). Gibt { id, row } zurück
+ * oder null – dann antwortet der Dienst mit 403, gleich ob es die Sicherung gibt oder nicht.
  */
 async function authorizedRow(request, db, syncId, { admin = false } = {}) {
-  const token = bearer(request);
+  const who = request.headers.get('X-Who') || '';
   const device = request.headers.get('X-Device') || '';
-  const [tokenHash, deviceHash, row] = await Promise.all([sha256B64(token), sha256B64(device), getCloudRow(db, syncId)]);
-  if (!row || !token || !SECRET_RE.test(device)) return null;
+  const token = bearer(request);
+  const id = await cloudRowId(who, syncId);
+  const [tokenHash, deviceHash, row] = await Promise.all([sha256B64(token), sha256B64(device), getCloudRow(db, id)]);
+  if (!row || !WHO_RE.test(who) || !token || !SECRET_RE.test(device)) return null;
   if (!sameText(tokenHash, admin ? row.admin_hash : row.auth_hash)) return null;
-  return parseDevices(row.devices).some((d) => sameText(d, deviceHash)) ? row : null;
+  return parseDevices(row.devices).some((d) => sameText(d, deviceHash)) ? { id, row } : null;
 }
 
 /**
@@ -389,32 +434,28 @@ async function authorizedRow(request, db, syncId, { admin = false } = {}) {
  * Sie wirken nur, wenn die Zeile in `cloud` noch von diesem Schreibvorgang (`writer`) stammt – kam ein anderer
  * Schreibvorgang dazwischen, bleibt dessen Stand vollständig erhalten.
  */
-function chunkStatements(db, syncId, ct, writer) {
+function chunkStatements(db, id, ct, writer) {
   const statements = [];
   let count = 0;
   for (let i = 0; i < ct.length; i += SYNC_CHUNK_CHARS, count++) {
     statements.push(
       db
         .prepare(
-          'INSERT INTO cloud_chunks (sync_id, idx, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM cloud WHERE sync_id = ? AND writer = ?) ON CONFLICT(sync_id, idx) DO UPDATE SET data = excluded.data',
+          'INSERT INTO cloud_chunks (cloud_id, idx, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM cloud WHERE id = ? AND writer = ?) ON CONFLICT(cloud_id, idx) DO UPDATE SET data = excluded.data',
         )
-        .bind(syncId, count, ct.slice(i, i + SYNC_CHUNK_CHARS), syncId, writer),
+        .bind(id, count, ct.slice(i, i + SYNC_CHUNK_CHARS), id, writer),
     );
   }
-  statements.push(
-    db.prepare('DELETE FROM cloud_chunks WHERE sync_id = ? AND idx >= ? AND EXISTS (SELECT 1 FROM cloud WHERE sync_id = ? AND writer = ?)').bind(syncId, count, syncId, writer),
-  );
+  statements.push(db.prepare('DELETE FROM cloud_chunks WHERE cloud_id = ? AND idx >= ? AND EXISTS (SELECT 1 FROM cloud WHERE id = ? AND writer = ?)').bind(id, count, id, writer));
   return { statements, count };
 }
 
 /** Zeile und Stücke in einem Zug lesen (gehören sicher zum selben Stand). */
-async function readCloudData(db, syncId, extra = []) {
-  const results = await db.batch([
-    ...extra,
-    db.prepare('SELECT version, updated_at, iv, z, chunks FROM cloud WHERE sync_id = ?').bind(syncId),
-    db.prepare('SELECT idx, data FROM cloud_chunks WHERE sync_id = ? ORDER BY idx').bind(syncId),
+async function readCloudData(db, id) {
+  const [head, parts] = await db.batch([
+    db.prepare('SELECT version, updated_at, iv, z, chunks FROM cloud WHERE id = ?').bind(id),
+    db.prepare('SELECT idx, data FROM cloud_chunks WHERE cloud_id = ? ORDER BY idx').bind(id),
   ]);
-  const [head, parts] = results.slice(extra.length);
   const current = head?.results?.[0];
   if (!current) return null;
   const chunks = (parts?.results || []).filter((c) => Number(c.idx) < Number(current.chunks));
@@ -429,36 +470,44 @@ async function readCloudData(db, syncId, extra = []) {
   };
 }
 
-/** Neues Gerät: Passwort prüfen (gezählt), Gerät eintragen und den Stand herausgeben. */
-async function openSync(request, env, db, syncId) {
-  const body = await readJson(request, 2048);
-  if (!body || !WHO_RE.test(String(body.who || '')) || !SECRET_RE.test(String(body.device || ''))) return json(request, env, 400, { error: 'invalid-request' });
-  const attempt = await reserveAttempt(request, db, body.who);
-  if (attempt.exceeded) return json(request, env, 429, attempt.exceeded);
-  const row = await getCloudRow(db, syncId);
-  if (!row || !sameText(row.who, body.who) || !(await tokenMatchesHash(request, row.auth_hash))) return json(request, env, 200, { found: false });
-  await attempt.release();
-  const devices = [...parseDevices(row.devices).filter((d) => d !== body.device), body.device].slice(-SYNC_MAX_DEVICES);
-  const data = await readCloudData(db, syncId, [db.prepare('UPDATE cloud SET devices = ?, seen_at = ? WHERE sync_id = ?').bind(JSON.stringify(devices), Date.now(), syncId)]);
-  return json(request, env, 200, data || { found: false });
+/** Trägt ein Gerät ein (die zuletzt geöffneten bleiben). Bedingt geschrieben – gleichzeitiges Öffnen verliert kein Gerät. */
+async function addDevice(db, id, deviceHash) {
+  for (let i = 0; i < 5; i++) {
+    const row = await db.prepare('SELECT devices FROM cloud WHERE id = ?').bind(id).first();
+    if (!row) return;
+    const devices = [...parseDevices(row.devices).filter((d) => d !== deviceHash), deviceHash].slice(-SYNC_MAX_DEVICES);
+    const res = await db.prepare('UPDATE cloud SET devices = ?, seen_at = ? WHERE id = ? AND devices = ?').bind(JSON.stringify(devices), Date.now(), id, row.devices).run();
+    if (Number(res?.meta?.changes)) return;
+  }
 }
 
-async function tokenMatchesHash(request, hash) {
-  const token = bearer(request);
-  return Boolean(token) && sameText(await sha256B64(token), hash);
+/** Neues Gerät: Passwort prüfen (gezählt), Gerät eintragen und den Stand herausgeben. */
+async function openSync(request, env, db, syncId) {
+  if (tooManySyncWrites(request, env)) return json(request, env, 429, { error: 'too-many-requests' });
+  const body = await readJson(request, 2048);
+  if (!body || !WHO_RE.test(String(body.who || '')) || !SECRET_RE.test(String(body.device || ''))) return json(request, env, 400, { error: 'invalid-request' });
+  const attempt = await reserveAttempt(request, env, db, body.who);
+  if (attempt.exceeded) return json(request, env, 429, attempt.exceeded);
+  const id = await cloudRowId(body.who, syncId);
+  const row = await getCloudRow(db, id);
+  if (!row || !(await tokenMatchesHash(request, row.auth_hash))) return json(request, env, 200, { found: false });
+  await attempt.release();
+  await addDevice(db, id, body.device);
+  return json(request, env, 200, (await readCloudData(db, id)) || { found: false });
 }
 
 async function getSync(request, env, db, syncId) {
-  const row = await authorizedRow(request, db, syncId);
-  if (!row) return json(request, env, 403, { error: 'forbidden' });
+  const auth = await authorizedRow(request, db, syncId);
+  if (!auth) return json(request, env, 403, { error: 'forbidden' });
+  const { id, row } = auth;
   const now = Date.now();
-  // Abruf zählt als Nutzung (für das Aufräumen nach 400 Tagen) – höchstens einmal am Tag geschrieben.
-  if (now - Number(row.seen_at) > DAY_MS) await db.prepare('UPDATE cloud SET seen_at = ? WHERE sync_id = ?').bind(now, syncId).run();
+  // Abruf zählt als Nutzung (für das Aufräumen) – höchstens einmal am Tag geschrieben.
+  if (now - Number(row.seen_at) > DAY_MS) await db.prepare('UPDATE cloud SET seen_at = ? WHERE id = ?').bind(now, id).run();
   const since = new URL(request.url).searchParams.get('since');
   if (since !== null && /^\d{1,15}$/.test(since) && Number(since) === Number(row.version)) {
     return json(request, env, 200, { found: true, version: Number(row.version), updatedAt: Number(row.updated_at), unchanged: true });
   }
-  const data = await readCloudData(db, syncId);
+  const data = await readCloudData(db, id);
   return json(request, env, data ? 200 : 403, data || { error: 'forbidden' });
 }
 
@@ -473,30 +522,37 @@ async function createSync(request, env, db, syncId, body) {
   ) {
     return json(request, env, 400, { error: 'invalid-keys' });
   }
-  const attempt = await reserveAttempt(request, db, body.who);
-  if (attempt.exceeded) return json(request, env, 429, attempt.exceeded);
   const now = Date.now();
   const day = Math.floor(now / DAY_MS) * DAY_MS;
-  const [created, total] = await db.batch([
-    countStatement(db, `c|${attempt.ip}`, day),
-    db.prepare('SELECT COALESCE(SUM(chunks), 0) AS n FROM cloud'),
+  // Zuerst die Grenzen je Anschluss (IPv6: ganzes /48) und für den Speicher – sie zählen nicht als Versuch der Lehrkraft.
+  const ip = await ipKey(request, env, db, { groups: 3 });
+  const [creates, chars, total] = await db.batch([
+    countStatement(db, `c|${ip}`, day),
+    countStatement(db, `cb|${ip}`, day, body.ct.length),
+    db.prepare('SELECT COALESCE(SUM(size), 0) AS n FROM cloud'),
   ]);
-  if (Number(created?.results?.[0]?.n ?? Infinity) > CREATES_PER_DAY_PER_IP) return json(request, env, 429, { error: 'too-many-creates', retryAfter: secondsUntil(day + DAY_MS) });
+  if (Number(creates?.results?.[0]?.n ?? Infinity) > CREATES_PER_DAY_PER_IP || Number(chars?.results?.[0]?.n ?? Infinity) > CREATE_CHARS_PER_DAY_PER_IP) {
+    return json(request, env, 429, { error: 'too-many-creates', retryAfter: secondsUntil(day + DAY_MS) });
+  }
+  if (Number(total?.results?.[0]?.n) + body.ct.length > SYNC_MAX_TOTAL_CHARS) {
+    await db.batch([uncountStatement(db, `c|${ip}`, day), uncountStatement(db, `cb|${ip}`, day, body.ct.length)]);
+    return json(request, env, 507, { error: 'storage-full' });
+  }
+  // Jedes Anlegen zählt als Versuch der Lehrkraft – sonst ließe sich über „gibt es schon“ (409) ohne Grenze raten.
+  const attempt = await reserveAttempt(request, env, db, body.who);
+  if (attempt.exceeded) return json(request, env, 429, attempt.exceeded);
+  const id = await cloudRowId(body.who, syncId);
   const writer = crypto.randomUUID();
-  const { statements, count } = chunkStatements(db, syncId, body.ct, writer);
-  if ((Number(total?.results?.[0]?.n) + count) * SYNC_CHUNK_CHARS > SYNC_MAX_TOTAL_CHARS) return json(request, env, 507, { error: 'storage-full' });
+  const { statements, count } = chunkStatements(db, id, body.ct, writer);
   const [inserted] = await db.batch([
     db
       .prepare(
-        'INSERT INTO cloud (sync_id, who, version, updated_at, seen_at, auth_hash, admin_hash, devices, iv, z, chunks, writer) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(sync_id) DO NOTHING',
+        'INSERT INTO cloud (id, version, updated_at, seen_at, auth_hash, admin_hash, devices, iv, z, chunks, size, writer) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING',
       )
-      .bind(syncId, body.who, now, now, body.authHash, body.adminHash, JSON.stringify([body.device]), body.iv, body.z, count, writer),
+      .bind(id, now, now, body.authHash, body.adminHash, JSON.stringify([body.device]), body.iv, body.z, count, body.ct.length, writer),
     ...statements,
   ]);
-  // Gibt es schon (gleiches Passwort, z. B. auf einem anderen Gerät eingerichtet): Der Versuch bleibt gezählt –
-  // sonst ließe sich so ohne Grenze prüfen, ob es eine Sicherung gibt.
   if (!Number(inserted?.meta?.changes)) return json(request, env, 409, { error: 'exists' });
-  await attempt.release();
   return json(request, env, 201, { version: 1, updatedAt: now });
 }
 
@@ -505,19 +561,20 @@ async function putSync(request, env, db, syncId) {
   const body = await readJson(request, SYNC_MAX_BODY_BYTES);
   if (!validSyncData(body) || !Number.isInteger(body.baseVersion) || body.baseVersion < 0) return json(request, env, 400, { error: 'invalid-data' });
   if (body.baseVersion === 0) return createSync(request, env, db, syncId, body);
-  const row = await authorizedRow(request, db, syncId);
-  if (!row) return json(request, env, 403, { error: 'forbidden' });
+  const auth = await authorizedRow(request, db, syncId);
+  if (!auth) return json(request, env, 403, { error: 'forbidden' });
+  const { id, row } = auth;
   if (body.baseVersion !== Number(row.version)) {
     return json(request, env, 409, { error: 'conflict', version: Number(row.version), updatedAt: Number(row.updated_at) });
   }
   const now = Date.now();
   const version = Number(row.version) + 1;
   const writer = crypto.randomUUID();
-  const { statements, count } = chunkStatements(db, syncId, body.ct, writer);
+  const { statements, count } = chunkStatements(db, id, body.ct, writer);
   const [updated] = await db.batch([
     db
-      .prepare('UPDATE cloud SET version = ?, updated_at = ?, seen_at = ?, iv = ?, z = ?, chunks = ?, writer = ? WHERE sync_id = ? AND version = ?')
-      .bind(version, now, now, body.iv, body.z, count, writer, syncId, row.version),
+      .prepare('UPDATE cloud SET version = ?, updated_at = ?, seen_at = ?, iv = ?, z = ?, chunks = ?, size = ?, writer = ? WHERE id = ? AND version = ?')
+      .bind(version, now, now, body.iv, body.z, count, body.ct.length, writer, id, row.version),
     ...statements,
   ]);
   // Ein anderer Schreibvorgang kam dazwischen: Der Browser holt den neuen Stand und entscheidet neu.
@@ -526,9 +583,9 @@ async function putSync(request, env, db, syncId) {
 }
 
 async function deleteSync(request, env, db, syncId) {
-  const row = await authorizedRow(request, db, syncId, { admin: true });
-  if (!row) return json(request, env, 403, { error: 'forbidden' });
-  await db.batch([db.prepare('DELETE FROM cloud WHERE sync_id = ?').bind(syncId), db.prepare('DELETE FROM cloud_chunks WHERE sync_id = ?').bind(syncId)]);
+  const auth = await authorizedRow(request, db, syncId, { admin: true });
+  if (!auth) return json(request, env, 403, { error: 'forbidden' });
+  await db.batch([db.prepare('DELETE FROM cloud WHERE id = ?').bind(auth.id), db.prepare('DELETE FROM cloud_chunks WHERE cloud_id = ?').bind(auth.id)]);
   return json(request, env, 200, { deleted: true });
 }
 

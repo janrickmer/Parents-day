@@ -121,12 +121,18 @@ function aesKey(encKey) {
   return crypto.subtle.importKey('raw', b64ToBytes(encKey), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
+/** Zusatzdaten (AAD): Adresse und Version – Daten lassen sich weder einer anderen Sicherung noch einer anderen
+ * Version unterschieben (z. B. ein älterer Stand als neuerer). */
+function aad(keys, version) {
+  return enc.encode(`${VERSION}|${keys.syncId}|${version}`);
+}
+
 /**
  * Verschlüsselt beliebige Daten für die Cloud-Sicherung (vorher mit gzip verkleinert, wenn der Browser das kann).
- * Die ID der Sicherung ist mit verschlüsselt (AAD): Daten lassen sich nicht unbemerkt einer anderen Sicherung unterschieben.
+ * @param {number} version – Version, die der Stand beim Dienst bekommt (1 beim Anlegen, sonst baseVersion + 1)
  * @returns {Promise<{iv:string, ct:string, z:0|1}>}
  */
-export async function encryptCloudData(keys, data) {
+export async function encryptCloudData(keys, data, version) {
   let bytes = enc.encode(JSON.stringify(data));
   let z = 0;
   if (typeof CompressionStream === 'function') {
@@ -138,15 +144,13 @@ export async function encryptCloudData(keys, data) {
     }
   }
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(`${VERSION}|${keys.syncId}`) }, await aesKey(keys.encKey), bytes));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(keys, version) }, await aesKey(keys.encKey), bytes));
   return { iv: bytesToB64(iv), ct: bytesToB64(ct), z };
 }
 
-/** Entschlüsselt Daten der Cloud-Sicherung. Wirft, wenn Schlüssel oder Daten nicht passen. */
-export async function decryptCloudData(keys, { iv, ct, z }) {
-  let bytes = new Uint8Array(
-    await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(iv), additionalData: enc.encode(`${VERSION}|${keys.syncId}`) }, await aesKey(keys.encKey), b64ToBytes(ct)),
-  );
+/** Entschlüsselt Daten der Cloud-Sicherung (Version aus der Antwort des Dienstes). Wirft, wenn etwas nicht passt. */
+export async function decryptCloudData(keys, { iv, ct, z, version }) {
+  let bytes = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(iv), additionalData: aad(keys, version) }, await aesKey(keys.encKey), b64ToBytes(ct)));
   if (Number(z) === 1) {
     if (typeof DecompressionStream !== 'function') throw new Error('Dieser Browser kann die Cloud-Sicherung nicht lesen. Bitte aktualisieren Sie ihn.');
     bytes = await transform(bytes, new DecompressionStream('gzip'));
@@ -160,10 +164,27 @@ export function packCloudData(state, eventDraft = null) {
 }
 
 /**
- * Prüft den entschlüsselten Inhalt. Wirft bei unbrauchbaren Daten.
+ * Hinweis „umgezogen“: Nach einem neuen Passwort ersetzt er den Stand in der alten Sicherung, falls sie sich nicht
+ * löschen ließ. Geräte, die ihn abrufen, fragen nach dem neuen Passwort.
+ */
+export function packMovedNotice() {
+  return { app: 'ParentsDay', type: 'cloud-moved', v: 1 };
+}
+
+/** Die Sicherung hat ein neues Passwort (Hinweis „umgezogen“ statt eines Stands). */
+export class CloudMovedError extends Error {
+  constructor() {
+    super('Ihre Cloud-Sicherung hat ein neues Passwort.');
+    this.name = 'CloudMovedError';
+  }
+}
+
+/**
+ * Prüft den entschlüsselten Inhalt. Wirft bei unbrauchbaren Daten (CloudMovedError beim Hinweis „umgezogen“).
  * @returns {{state: object, eventDraft: object|null}}
  */
 export function unpackCloudData(raw) {
+  if (raw && raw.app === 'ParentsDay' && raw.type === 'cloud-moved') throw new CloudMovedError();
   if (!raw || raw.app !== 'ParentsDay' || raw.type !== 'cloud-state') throw new Error('Die Cloud-Sicherung enthält keinen gültigen ParentsDay-Stand.');
   return { state: normalizeTeacherState(raw.state), eventDraft: cleanDraft(raw.eventDraft) };
 }
@@ -188,8 +209,11 @@ function call(method, path, opts = {}) {
 export function cloudErrorMessage(err) {
   if (err instanceof MailboxError && err.status === 429) {
     const seconds = Number(err.data?.retryAfter || 0);
-    const wait = seconds > 5400 ? 'bis morgen' : `${Math.max(1, Math.ceil(seconds / 60))} Minuten`;
-    if (err.data?.error === 'locked') return `Zu viele Versuche mit einem falschen Passwort. Zum Schutz Ihrer Daten ist das Öffnen der Cloud-Sicherung ${seconds > 5400 ? 'bis morgen' : `für ${wait}`} gesperrt. Auf Geräten, die schon verbunden sind, läuft sie weiter.`;
+    const minutes = Math.max(1, Math.ceil(seconds / 60));
+    const wait = seconds > 5400 ? 'bis morgen' : `für ${minutes === 1 ? 'eine Minute' : `${minutes} Minuten`}`;
+    if (err.data?.error === 'locked') {
+      return `Für Ihre Cloud-Sicherung gab es zu viele Versuche mit einem falschen Passwort (nicht unbedingt von Ihnen). Zum Schutz Ihrer Daten ist das Öffnen und Einrichten ${wait} gesperrt. Geräte, die schon verbunden sind, gleichen weiter ab.`;
+    }
     if (err.data?.error === 'too-many-creates') return 'Von Ihrem Internetanschluss wurden heute schon sehr viele Cloud-Sicherungen eingerichtet. Bitte versuchen Sie es morgen noch einmal.';
   }
   return err?.message || MESSAGES.default;
@@ -214,8 +238,8 @@ export async function openCloudRecord(keys, device) {
   return { ...data, version: Number(data.version), updatedAt: Number(data.updatedAt) };
 }
 
-function deviceHeaders(device) {
-  return { 'X-Device': device };
+function deviceHeaders(keys) {
+  return { 'X-Device': keys.device, 'X-Who': keys.who };
 }
 
 /**
@@ -224,7 +248,7 @@ function deviceHeaders(device) {
  */
 export async function fetchCloudRecord(keys, { since } = {}) {
   const query = Number.isInteger(since) && since > 0 ? `?since=${since}` : '';
-  const data = await call('GET', `/v1/sync/${keys.syncId}${query}`, { secret: keys.authToken, headers: deviceHeaders(keys.device), timeout: UPLOAD_TIMEOUT_MS });
+  const data = await call('GET', `/v1/sync/${keys.syncId}${query}`, { secret: keys.authToken, headers: deviceHeaders(keys), timeout: UPLOAD_TIMEOUT_MS });
   return { ...data, version: Number(data.version), updatedAt: Number(data.updatedAt) };
 }
 
@@ -252,12 +276,12 @@ export async function createCloudRecord(keys, data, adminHash) {
  */
 export async function saveCloudRecord(keys, baseVersion, data, { keepalive = false } = {}) {
   checkSize(data);
-  const res = await call('PUT', `/v1/sync/${keys.syncId}`, { body: { baseVersion, ...data }, secret: keys.authToken, headers: deviceHeaders(keys.device), timeout: UPLOAD_TIMEOUT_MS, keepalive });
+  const res = await call('PUT', `/v1/sync/${keys.syncId}`, { body: { baseVersion, ...data }, secret: keys.authToken, headers: deviceHeaders(keys), timeout: UPLOAD_TIMEOUT_MS, keepalive });
   return { version: Number(res.version), updatedAt: Number(res.updatedAt) };
 }
 
 /** Löscht die Sicherung (Admin-Token aus dem Passwort und eingetragenes Gerät nötig). */
 export async function deleteCloudRecord(keys, adminToken) {
-  const data = await call('DELETE', `/v1/sync/${keys.syncId}`, { secret: adminToken, headers: deviceHeaders(keys.device) });
+  const data = await call('DELETE', `/v1/sync/${keys.syncId}`, { secret: adminToken, headers: deviceHeaders(keys) });
   return Boolean(data?.deleted);
 }

@@ -14,8 +14,9 @@ import { isValidEmail } from '../core/codes.js';
 import { mailboxEnabled, checkMailboxService } from '../core/mailbox.js';
 import { hasTeacherMailbox, fetchMailboxResponses, clearTeacherMailbox } from '../core/teacher-mailbox.js';
 import { UP_TO_DATE_REASONS } from '../core/responses.js';
-import { isCloudConnected, loadCloudConfig, forgetCloudOnDevice, endCloudSession, stopCloudSync } from '../core/cloud-sync.js';
-import { cloudSettingsCard } from '../components/cloud-ui.js';
+import { isCloudConnected, isCloudUpToDate, loadCloudConfig, forgetCloudOnDevice, endCloudSession, stopCloudSync, flushCloudSync } from '../core/cloud-sync.js';
+import { cloudEnabled } from '../core/cloud.js';
+import { cloudSettingsCard, openUnlockDialog } from '../components/cloud-ui.js';
 
 // Höchstens MAX_DAYS Tage: Grenze des Termin-Schlüssels (siehe core/transport.js).
 // Die Adresse steht im Link/QR-Code des Elternbriefs – längere Texte machen den QR-Code unlesbar.
@@ -671,8 +672,16 @@ export default function render(ctx) {
     if (ignoreRepeat(e) || deleteAllBtn.getAttribute('aria-disabled') === 'true') return;
     // Digitaler Briefkasten: wird vorher geleert (best effort), damit keine Kopien auf dem Server bleiben.
     const withMailbox = hasTeacherMailbox(getCurrentState() || saved);
-    const withCloud = Boolean(loadCloudConfig(saved.teacher.teacherCode));
-    const cloudConnected = isCloudConnected(saved.teacher.teacherCode);
+    const code = saved.teacher.teacherCode;
+    // Zuerst noch offene Änderungen in die Cloud-Sicherung – dann stimmt der Hinweis, was dort erhalten bleibt.
+    if (isCloudConnected(code)) {
+      setBusy(deleteAllBtn, true, 'Wird vorbereitet …');
+      await flushCloudSync();
+      setBusy(deleteAllBtn, false);
+    }
+    const withCloud = Boolean(loadCloudConfig(code));
+    const cloudConnected = isCloudConnected(code);
+    const cloudComplete = isCloudUpToDate(code);
     const content = h(
       'div',
       { class: 'stack-small' },
@@ -684,12 +693,23 @@ export default function render(ctx) {
             'Auch Ihr digitaler Briefkasten wird geleert: Rückmeldungen, die dort noch liegen, werden vom Server gelöscht. Sind neue darunter, fragt ParentsDay vorher noch einmal nach.',
           )
         : null,
-      withCloud
+      withCloud && cloudComplete
         ? h(
             'p',
             { 'data-testid': 'delete-all-cloud-note' },
             'Ihre Cloud-Sicherung bleibt erhalten: Melden Sie sich wieder an und geben Ihr Passwort ein, ist Ihr Stand wieder da.',
             cloudConnected ? ' Möchten Sie auch sie löschen, nutzen Sie vorher oben „Cloud-Sicherung löschen“.' : '',
+          )
+        : null,
+      withCloud && !cloudComplete
+        ? alertBox(
+            'warning',
+            h(
+              'p',
+              { 'data-testid': 'delete-all-cloud-note' },
+              h('strong', {}, 'Ihr aktueller Stand ist nicht vollständig in der Cloud-Sicherung'),
+              ' (keine Verbindung oder Passwort nicht eingegeben). Was hier seit dem letzten Abgleich geändert wurde, geht beim Löschen verloren.',
+            ),
           )
         : null,
       alertBox('warning', h('strong', {}, 'Wichtig: '), 'Speichern Sie vorher einen Zwischenstand, wenn Sie die Daten später noch brauchen. Mit dieser Datei können Sie alles wiederherstellen.'),
@@ -1002,8 +1022,35 @@ export default function render(ctx) {
           h(
             'div',
             { class: 'evt-empty-device' },
-            h('p', {}, h('strong', {}, 'Auf diesem Gerät sind noch keine Daten gespeichert. '), 'Falls Sie schon an einem anderen Gerät gearbeitet haben, laden Sie hier Ihren Zwischenstand – dann müssen Sie nichts neu eingeben.'),
-            h('button', { type: 'button', class: 'btn btn-secondary', 'data-testid': 'empty-device-load', onclick: () => openLoadBackupDialog({ navigate }) }, 'Zwischenstand laden'),
+            h(
+              'p',
+              {},
+              h('strong', {}, 'Auf diesem Gerät sind noch keine Daten gespeichert. '),
+              cloudEnabled() && !isCloudConnected(saved.teacher.teacherCode)
+                ? 'Falls Sie schon an einem anderen Gerät gearbeitet haben, holen Sie Ihren Stand mit dem Passwort Ihrer Cloud-Sicherung – oder laden Sie einen Zwischenstand. Dann müssen Sie nichts neu eingeben.'
+                : 'Falls Sie schon an einem anderen Gerät gearbeitet haben, laden Sie hier Ihren Zwischenstand – dann müssen Sie nichts neu eingeben.',
+            ),
+            cloudEnabled() && !isCloudConnected(saved.teacher.teacherCode)
+              ? h(
+                  'div',
+                  { class: 'cluster' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      class: 'btn btn-primary',
+                      'data-testid': 'empty-device-unlock',
+                      onclick: async (e) => {
+                        if (e.detail > 1) return;
+                        const result = await openUnlockDialog({ teacher: saved.teacher, message: 'Geben Sie das Passwort Ihrer Cloud-Sicherung ein – Ihr Stand wird auf dieses Gerät geholt.' });
+                        if (result === 'unlocked') markEmptyDevice(saved.teacher.teacherCode, false);
+                      },
+                    },
+                    'Passwort der Cloud-Sicherung eingeben',
+                  ),
+                  h('button', { type: 'button', class: 'btn btn-secondary', 'data-testid': 'empty-device-load', onclick: () => openLoadBackupDialog({ navigate }) }, 'Zwischenstand laden'),
+                )
+              : h('button', { type: 'button', class: 'btn btn-secondary', 'data-testid': 'empty-device-load', onclick: () => openLoadBackupDialog({ navigate }) }, 'Zwischenstand laden'),
           ),
         )
       : null;

@@ -74,13 +74,13 @@ function cloudSection() {
       'ul',
       {},
       h('li', {}, 'Der komplette Stand der Lehrkraft (Elternsprechtag, Klassen, Namen der Lernenden, Rückmeldungen, Termine, Schlüssel des Briefkastens) wird im Browser mit ihrem Passwort verschlüsselt (AES-256-GCM; Schlüssel aus dem Passwort mit PBKDF2 und HKDF) und so beim Dienst bei Cloudflare abgelegt.'),
-      h('li', {}, 'Das Passwort verlässt den Browser nie. Auch die Adresse der Sicherung beim Dienst wird aus dem Passwort berechnet: Ohne das Passwort lässt sich die Sicherung weder finden noch lesen, überschreiben oder löschen – auch nicht von ParentsDay.'),
+      h('li', {}, 'Das Passwort verlässt den Browser nie. Auch die Adresse der Sicherung beim Dienst wird aus dem Passwort berechnet: Ohne das Passwort lässt sich die Sicherung weder finden noch lesen oder löschen. Wer die Datenbank des Dienstes verwaltet, kann sie zwar nicht lesen, aber technisch löschen.'),
       h(
         'li',
         {},
-        'Um das Ausprobieren von Passwörtern zu verhindern, zählt der Dienst Versuche, eine Sicherung zu öffnen – je Lehrkraft (anhand eines Hashwerts aus Name und Geburtsdatum) und Internetanschluss. Statt der IP-Adresse speichert er dafür einen Hashwert mit täglich wechselndem Zufallswert, der sich nicht auf die Adresse zurückführen lässt; diese Zähler werden nach zwei Tagen gelöscht.',
+        'Um das Ausprobieren von Passwörtern zu verhindern, zählt der Dienst Versuche, eine Sicherung zu öffnen oder anzulegen – je Lehrkraft (anhand eines Hashwerts aus Name und Geburtsdatum, der nicht mit der Sicherung gespeichert wird) und Internetanschluss. Statt der IP-Adresse speichert er dafür einen pseudonymen Hashwert, der täglich wechselt; diese Zähler werden nach spätestens zwei Tagen gelöscht.',
       ),
-      h('li', {}, 'Die Lehrkraft kann die Cloud-Sicherung jederzeit unter „Weitere Einstellungen“ löschen. Wird sie 400 Tage weder geändert noch abgerufen, wird sie automatisch gelöscht.'),
+      h('li', {}, 'Die Lehrkraft kann die Cloud-Sicherung jederzeit unter „Weitere Einstellungen“ löschen. Wird sie 400 Tage weder geändert noch abgerufen, wird sie automatisch gelöscht – eine Sicherung, die nach dem Einrichten nie genutzt wurde, schon nach 30 Tagen.'),
       h('li', {}, 'Ist das Passwort auf einem Gerät gemerkt, liegen die daraus berechneten Schlüssel im Speicher dieses Browsers – wie der Stand selbst auch. Zum Ändern des Passworts und zum Löschen der Sicherung ist immer das Passwort nötig.'),
     ),
   );

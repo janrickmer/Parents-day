@@ -1,6 +1,7 @@
 // Abgleich mit der Cloud-Sicherung (Verschlüsselung und Dienst: core/cloud.js). Läuft im Hintergrund,
 // solange eine Lehrkraft angemeldet ist:
-//  • Nach jeder Änderung wird der Stand nach kurzer Pause hochgeladen (spätestens nach 10 Sekunden).
+//  • Nach jeder Änderung (auch an noch nicht gespeicherten Eingaben zum Elternsprechtag) wird der Stand nach
+//    kurzer Pause hochgeladen (spätestens nach 10 Sekunden).
 //  • Beim Anmelden, beim Zurückkehren auf die Seite und alle 3 Minuten wird geprüft, ob ein anderes Gerät
 //    einen neueren Stand gesichert hat – der wird dann übernommen.
 //  • Haben beide Seiten geändert (z. B. war ein Gerät offline), entscheidet die Lehrkraft (Konflikt-Dialog).
@@ -9,15 +10,26 @@
 //
 // Auf dem Gerät gespeichert, je Lehrkraft (Lehrkräftecode):
 //   localStorage  parentsday.cloud.<Code>     { v:2, syncId, version, dirty, syncedHash, pendingCreate,
-//                                               pendingAdminHash?, syncedAt, remember }
+//                                               pendingAdminHash?, blockedUntil?, syncedAt, remember }
 //                 version: Stand der Cloud, auf dem der Stand dieses Geräts beruht; syncedHash: Prüfsumme dieses
 //                 Stands – weicht der Stand davon ab, ist er „dirty“ und wird hochgeladen; pendingCreate:
 //                 Sicherung noch nicht angelegt (z. B. bei der Registrierung ohne Verbindung)
 //   parentsday.cloudKey.<Code>  { syncId, who, encKey, authToken, device } – im localStorage, wenn das Passwort
 //                 auf diesem Gerät gemerkt werden soll, sonst nur im sessionStorage (bis zum Abmelden bzw.
 //                 Schließen des Tabs). Das Admin-Token zum Löschen wird nie gespeichert.
+//   localStorage  parentsday.cloudDevice.<Code>  Geräte-Geheimnis dieses Browsers (allein ohne Wert; so bleibt
+//                 der Browser beim Dienst dasselbe eingetragene Gerät, auch wenn das Passwort nicht gemerkt wird)
 
-import { getSession, loadTeacherState, replaceState, onStateChange, loadEventDraft, storeEventDraft, isEmptyTeacherState } from './storage.js';
+import {
+  getSession,
+  loadTeacherState,
+  replaceState,
+  onStateChange,
+  onEventDraftStored,
+  loadEventDraft,
+  storeEventDraft,
+  isEmptyTeacherState,
+} from './storage.js';
 import {
   cloudEnabled,
   deriveCloudKeys,
@@ -27,6 +39,7 @@ import {
   encryptCloudData,
   decryptCloudData,
   packCloudData,
+  packMovedNotice,
   unpackCloudData,
   openCloudRecord,
   fetchCloudRecord,
@@ -34,21 +47,26 @@ import {
   saveCloudRecord,
   deleteCloudRecord,
   cloudErrorMessage,
+  CloudMovedError,
 } from './cloud.js';
 import { MailboxError, isValidTeacherMailbox } from './mailbox.js';
 
 const CONFIG_PREFIX = 'parentsday.cloud.';
 const KEY_PREFIX = 'parentsday.cloudKey.';
+const DEVICE_PREFIX = 'parentsday.cloudDevice.';
 const PUSH_DELAY_MS = 2000;
 const PUSH_MAX_WAIT_MS = 10000;
 const PULL_INTERVAL_MS = 3 * 60 * 1000;
 const PULL_ON_FOCUS_MS = 30 * 1000;
 const RETRY_MS = [15000, 30000, 60000, 120000, 300000];
 const UNSUPPORTED_RETRY_MS = 10 * 60 * 1000;
+const STORAGE_FULL_RETRY_MS = 60 * 60 * 1000;
 const KEEPALIVE_MAX_CHARS = 60000; // Browser erlauben mit keepalive höchstens 64 KB
 
 const NEEDS_PASSWORD =
   'Bitte geben Sie Ihr Passwort für die Cloud-Sicherung erneut ein. Vielleicht wurde es auf einem anderen Gerät geändert oder die Sicherung gelöscht.';
+const MOVED =
+  'Das Passwort Ihrer Cloud-Sicherung wurde auf einem anderen Gerät geändert. Bitte geben Sie das neue Passwort ein – Ihre Änderungen auf diesem Gerät bleiben erhalten.';
 
 // ---------- Speicher auf dem Gerät ----------
 
@@ -89,6 +107,7 @@ export function loadCloudConfig(code) {
     dirty: Boolean(cfg.dirty),
     syncedHash: typeof cfg.syncedHash === 'string' ? cfg.syncedHash : '',
     pendingCreate: Boolean(cfg.pendingCreate),
+    blockedUntil: Number(cfg.blockedUntil) || 0,
     syncedAt: typeof cfg.syncedAt === 'string' ? cfg.syncedAt : '',
     remember: cfg.remember !== false,
   };
@@ -98,9 +117,10 @@ function saveCloudConfig(code, cfg) {
   writeJson(localStorage, CONFIG_PREFIX + code, { ...cfg, v: 2 });
 }
 
-function updateConfig(code, fn) {
+/** Ändert die Einstellungen – nur, wenn sie noch zur Sicherung `syncId` gehören (sonst null). */
+function updateConfig(code, fn, syncId = null) {
   const cfg = loadCloudConfig(code);
-  if (!cfg) return null;
+  if (!cfg || (syncId && cfg.syncId !== syncId)) return null;
   fn(cfg);
   saveCloudConfig(code, cfg);
   return cfg;
@@ -123,6 +143,15 @@ function forgetKeys(code) {
   removeKey(sessionStorage, KEY_PREFIX + code);
 }
 
+/** Geräte-Geheimnis dieses Browsers für die Lehrkraft (wird bei Bedarf angelegt). */
+function deviceSecret(code) {
+  const stored = readJson(localStorage, DEVICE_PREFIX + code);
+  if (typeof stored === 'string' && /^[A-Za-z0-9_-]{43}$/.test(stored)) return stored;
+  const secret = newDeviceSecret();
+  writeJson(localStorage, DEVICE_PREFIX + code, secret);
+  return secret;
+}
+
 /** Kennt dieses Gerät (bzw. dieser Tab) das Passwort der Cloud-Sicherung? */
 export function hasCloudKeys(code) {
   return Boolean(loadKeys(code));
@@ -133,9 +162,19 @@ export function isCloudConnected(code) {
   return Boolean(loadCloudConfig(code) && loadKeys(code));
 }
 
+/**
+ * Ist der Stand dieses Geräts vollständig in der Cloud? (verbunden, angelegt, keine offenen Änderungen)
+ * Ohne Cloud-Sicherung false.
+ */
+export function isCloudUpToDate(code) {
+  const cfg = loadCloudConfig(code);
+  return Boolean(cfg && loadKeys(code) && !cfg.pendingCreate && !cfg.dirty && cfg.version > 0);
+}
+
 /** Entfernt alles zur Cloud-Sicherung von diesem Gerät. Die Sicherung selbst bleibt beim Dienst erhalten. */
 export function forgetCloudOnDevice(code) {
   removeKey(localStorage, CONFIG_PREFIX + code);
+  removeKey(localStorage, DEVICE_PREFIX + code);
   forgetKeys(code);
   if (code === active) {
     problem = null;
@@ -206,8 +245,9 @@ export function onRemoteApplied(fn) {
 }
 
 /**
- * Entscheidung bei einem Konflikt (beide Seiten geändert). Die Funktion erhält
- * { local: {state}, remote: {state, eventDraft}, remoteUpdatedAt } und gibt 'local' oder 'remote' zurück.
+ * Entscheidung bei einem Konflikt (beide Seiten verschieden). Die Funktion erhält
+ * { local: {state}, remote: {state, eventDraft}, remoteUpdatedAt, noBase } und gibt 'local' oder 'remote' zurück.
+ * noBase: Dieses Gerät hatte noch nie einen gemeinsamen Stand mit der Sicherung (z. B. gerade eingerichtet).
  */
 export function setConflictResolver(fn) {
   conflictResolver = fn;
@@ -226,9 +266,12 @@ export function sameContent(a, b) {
   return contentKey(a) === contentKey(b);
 }
 
-/** Prüfsumme des Inhalts (zwei 32-Bit-FNV-Varianten) – zum Erkennen, ob sich seit dem Abgleich etwas geändert hat. */
-function contentHash(state) {
-  const text = contentKey(state);
+/**
+ * Prüfsumme von Stand und Entwurf (zwei 32-Bit-FNV-Varianten) – zum Erkennen, ob sich seit dem Abgleich etwas
+ * geändert hat. Ohne Angabe gilt der Entwurf, der zu diesem Stand gespeichert ist.
+ */
+function contentHash(state, draft = state ? loadEventDraft(state) : null) {
+  const text = `${contentKey(state)}|${JSON.stringify(draft || null)}`;
   let a = 0x811c9dc5;
   let b = 0x9747b28c;
   for (let i = 0; i < text.length; i++) {
@@ -260,14 +303,12 @@ let retryIndex = 0;
 let lastPullAt = 0;
 let applyingRemote = false;
 
-// Jede Änderung am Stand einer Lehrkraft mit Cloud-Sicherung wird vermerkt und (verzögert) hochgeladen.
-// Speichern ohne inhaltliche Änderung (z. B. nur „Zuletzt abgerufen“) zählt nicht.
-onStateChange((state) => {
-  if (applyingRemote) return;
-  const code = state?.teacher?.teacherCode;
+/** Änderung am Stand oder am Entwurf: vermerken und (verzögert) hochladen. Ohne inhaltliche Änderung nichts. */
+function noteLocalChange(code) {
+  if (applyingRemote || !code) return;
   const cfg = loadCloudConfig(code);
   if (!cfg) return;
-  const dirty = contentHash(state) !== cfg.syncedHash;
+  const dirty = contentHash(loadTeacherState(code)) !== cfg.syncedHash;
   if (dirty === cfg.dirty) {
     if (dirty && code === active) schedulePush();
     return;
@@ -277,7 +318,10 @@ onStateChange((state) => {
     if (dirty) schedulePush();
     emitStatus();
   }
-});
+}
+
+onStateChange((state) => noteLocalChange(state?.teacher?.teacherCode));
+onEventDraftStored((state) => noteLocalChange(state?.teacher?.teacherCode));
 
 function schedulePush() {
   const now = Date.now();
@@ -334,12 +378,14 @@ async function syncOnce(code, { pull, keepalive }) {
     emitStatus();
     return;
   }
+  // Anlegen wurde abgewiesen (zu viele Versuche, Speicher voll): bis dahin nicht erneut versuchen.
+  if (cfg.pendingCreate && cfg.blockedUntil > Date.now()) return;
   syncing = true;
   emitStatus();
   try {
     if (cfg.pendingCreate) await create(code, cfg, keys);
-    // Noch kein gemeinsamer Stand (z. B. Anlegen traf auf eine vorhandene Sicherung): erst abgleichen
-    else if (cfg.version === 0) await resolveConflict(code, keys);
+    // Noch kein gemeinsamer Stand (Anlegen traf auf eine vorhandene Sicherung): erst abgleichen
+    else if (cfg.version === 0) await resolveConflict(code, keys, null, { noBase: true });
     else if (cfg.dirty) await push(code, cfg, keys, keepalive);
     else if (pull) await pullRemote(code, cfg, keys);
     if (!problem || !['needs-password', 'conflict'].includes(problem.kind)) {
@@ -356,54 +402,70 @@ async function syncOnce(code, { pull, keepalive }) {
 }
 
 /** Nach dem Hoch- oder Herunterladen: Version und Prüfsumme merken; weicht der Stand inzwischen ab, gleich noch einmal. */
-function markSynced(code, version, hash) {
+function markSynced(code, syncId, version, hash) {
   const local = loadTeacherState(code);
-  const cfg = updateConfig(code, (c) => {
-    c.version = version;
-    c.pendingCreate = false;
-    delete c.pendingAdminHash;
-    c.syncedHash = hash;
-    c.dirty = Boolean(local) && contentHash(local) !== hash;
-    c.syncedAt = new Date().toISOString();
-  });
+  const cfg = updateConfig(
+    code,
+    (c) => {
+      c.version = version;
+      c.pendingCreate = false;
+      delete c.pendingAdminHash;
+      delete c.blockedUntil;
+      c.syncedHash = hash;
+      c.dirty = Boolean(local) && contentHash(local) !== hash;
+      c.syncedAt = new Date().toISOString();
+    },
+    syncId,
+  );
   if (cfg?.dirty && code === active) schedulePush();
 }
 
-/** Aktueller Stand, verschlüsselt, samt Prüfsumme. */
-async function sealCurrent(code, keys) {
+/** Aktueller Stand (samt Entwurf), verschlüsselt für die Version `version`, samt Prüfsumme. */
+async function sealCurrent(code, keys, version) {
   const state = loadTeacherState(code);
   if (!state) return null;
-  const data = await encryptCloudData(keys, packCloudData(state, loadEventDraft(state)));
-  return { data, hash: contentHash(state) };
+  const draft = loadEventDraft(state);
+  const data = await encryptCloudData(keys, packCloudData(state, draft), version);
+  return { data, hash: contentHash(state, draft) };
 }
 
 async function create(code, cfg, keys) {
-  const sealed = await sealCurrent(code, keys);
+  const sealed = await sealCurrent(code, keys, 1);
   if (!sealed) return;
   try {
     const res = await createCloudRecord(keys, sealed.data, cfg.pendingAdminHash);
-    markSynced(code, res.version, sealed.hash);
+    markSynced(code, keys.syncId, res.version, sealed.hash);
   } catch (err) {
-    if (!(err instanceof MailboxError) || err.status !== 409) throw err;
+    if (!(err instanceof MailboxError)) throw err;
+    if (err.status === 429 || err.status === 507) {
+      const wait = err.status === 507 ? STORAGE_FULL_RETRY_MS : Math.max(60, Number(err.data?.retryAfter) || 60) * 1000;
+      updateConfig(code, (c) => (c.blockedUntil = Date.now() + wait), keys.syncId);
+      throw err;
+    }
+    if (err.status !== 409) throw err;
     // Mit diesem Passwort gibt es schon eine Sicherung (z. B. auf einem anderen Gerät eingerichtet):
     // öffnen, das Gerät eintragen und die beiden Stände abgleichen.
     const rec = await openCloudRecord(keys, keys.device);
     if (!rec.found) throw err;
-    updateConfig(code, (c) => {
-      c.pendingCreate = false;
-      delete c.pendingAdminHash;
-      c.version = 0;
-    });
-    await resolveConflict(code, keys, { rec, remote: unpackCloudData(await decryptCloudData(keys, rec)) });
+    updateConfig(
+      code,
+      (c) => {
+        c.pendingCreate = false;
+        delete c.pendingAdminHash;
+        c.version = 0;
+      },
+      keys.syncId,
+    );
+    await resolveConflict(code, keys, { rec, remote: unpackCloudData(await decryptCloudData(keys, rec)) }, { noBase: true });
   }
 }
 
 async function push(code, cfg, keys, keepalive) {
-  const sealed = await sealCurrent(code, keys);
+  const sealed = await sealCurrent(code, keys, cfg.version + 1);
   if (!sealed) return;
   try {
     const res = await saveCloudRecord(keys, cfg.version, sealed.data, { keepalive: keepalive && sealed.data.ct.length < KEEPALIVE_MAX_CHARS });
-    markSynced(code, res.version, sealed.hash);
+    markSynced(code, keys.syncId, res.version, sealed.hash);
   } catch (err) {
     if (err instanceof MailboxError && err.status === 409) return resolveConflict(code, keys);
     throw err;
@@ -420,24 +482,38 @@ async function pullRemote(code, cfg, keys) {
   lastPullAt = Date.now();
   const { rec, remote } = await fetchRemote(keys, cfg.version);
   const latest = loadCloudConfig(code);
-  // Inzwischen abgemeldet oder Cloud-Sicherung entfernt? Dann nichts mehr in den Speicher schreiben.
-  if (code !== active || !latest || latest.syncId !== cfg.syncId) return;
+  // Inzwischen abgemeldet, Cloud-Sicherung entfernt oder ein anderer Tab schon weiter? Dann nichts übernehmen.
+  if (code !== active || !latest || latest.syncId !== cfg.syncId || latest.version !== cfg.version) return;
   if (!rec.found) return;
   if (rec.unchanged) {
-    updateConfig(code, (c) => (c.syncedAt = new Date().toISOString()));
+    updateConfig(code, (c) => (c.syncedAt = new Date().toISOString()), cfg.syncId);
+    return;
+  }
+  if (rec.version < cfg.version) {
+    // Der Dienst hat einen älteren Stand als dieses Gerät (z. B. nach einer Wiederherstellung der Datenbank):
+    // den Stand dieses Geräts wieder hochladen statt Änderungen zu verlieren.
+    updateConfig(
+      code,
+      (c) => {
+        c.version = rec.version;
+        c.dirty = true;
+      },
+      cfg.syncId,
+    );
+    again = true;
     return;
   }
   // Während des Abrufs hier geändert? Dann haben beide Seiten Neues.
   if (latest.dirty) return resolveConflict(code, keys, { rec, remote });
-  applyRemote(code, remote, rec);
+  applyRemote(code, keys.syncId, remote, rec);
 }
 
-async function resolveConflict(code, keys, fetched = null) {
+async function resolveConflict(code, keys, fetched = null, { noBase = false } = {}) {
   const { rec, remote } = fetched || (await fetchRemote(keys));
-  if (code !== active || !loadCloudConfig(code) || !rec.found || !remote) return;
+  if (code !== active || loadCloudConfig(code)?.syncId !== keys.syncId || !rec.found || !remote) return;
   const local = loadTeacherState(code);
-  if (!local || isEmptyTeacherState(local)) return applyRemote(code, remote, rec);
-  if (sameContent(local, remote.state)) return markSynced(code, rec.version, contentHash(remote.state));
+  if (!local || isEmptyTeacherState(local)) return applyRemote(code, keys.syncId, remote, rec);
+  if (sameContent(local, remote.state)) return markSynced(code, keys.syncId, rec.version, contentHash(remote.state, remote.eventDraft));
   let choice = 'local';
   // Ist die Cloud leer (z. B. auf einem neuen Gerät eingerichtet), gilt ohne Rückfrage der Stand dieses Geräts.
   if (!isEmptyTeacherState(remote.state)) {
@@ -448,32 +524,37 @@ async function resolveConflict(code, keys, fetched = null) {
     problem = { kind: 'conflict', message: '' };
     syncing = false;
     emitStatus();
-    choice = await conflictResolver({ local: { state: local }, remote, remoteUpdatedAt: rec.updatedAt });
+    choice = await conflictResolver({ local: { state: local }, remote, remoteUpdatedAt: rec.updatedAt, noBase });
     problem = null;
-    if (active !== code || !loadCloudConfig(code)) return;
+    if (active !== code || loadCloudConfig(code)?.syncId !== keys.syncId) return;
   }
   if (choice === 'remote') {
-    applyRemote(code, remote, rec);
+    applyRemote(code, keys.syncId, remote, rec);
     return;
   }
   // Stand dieses Geräts behalten: er ersetzt den in der Cloud (nächste Runde lädt hoch).
-  updateConfig(code, (c) => {
-    c.version = rec.version;
-    c.syncedHash = contentHash(remote.state);
-    c.dirty = true;
-  });
+  updateConfig(
+    code,
+    (c) => {
+      c.version = rec.version;
+      c.syncedHash = contentHash(remote.state, remote.eventDraft);
+      c.dirty = true;
+    },
+    keys.syncId,
+  );
   again = true;
   schedulePush();
 }
 
-function applyRemote(code, remote, rec, source = 'sync') {
+function applyRemote(code, syncId, remote, rec, source = 'sync') {
   const current = loadTeacherState(code);
   const next = remote.state;
   // Gespeichert wird unter dem Lehrkräftecode der angemeldeten Lehrkraft (bei gleichem Namen und Geburtsdatum derselbe).
   next.teacher.teacherCode = code;
+  // Prüfsumme des Stands aus der Cloud – vor Ergänzungen, die es nur auf diesem Gerät gibt (die werden dann hochgeladen).
+  const hash = contentHash(next, remote.eventDraft);
   // Kein Briefkasten in der Cloud, aber auf diesem Gerät: behalten – sonst wären die Rückmeldungen darin nicht mehr lesbar.
   if (!next.mailbox && isValidTeacherMailbox(current?.mailbox)) next.mailbox = current.mailbox;
-  const hash = contentHash(remote.state);
   let saved;
   applyingRemote = true;
   try {
@@ -482,7 +563,7 @@ function applyRemote(code, remote, rec, source = 'sync') {
   } finally {
     applyingRemote = false;
   }
-  markSynced(code, rec.version, hash);
+  markSynced(code, syncId, rec.version, hash);
   for (const fn of remoteListeners) {
     try {
       fn({ state: saved, updatedAt: rec.updatedAt, source });
@@ -492,24 +573,27 @@ function applyRemote(code, remote, rec, source = 'sync') {
   }
 }
 
-/** 403: Dieses Gerät hat keinen Zugang mehr (Passwort geändert, Sicherung gelöscht oder Gerät ausgetragen). */
-function handleForbidden(code, rejected) {
+/**
+ * Dieses Gerät hat keinen Zugang mehr (403: Passwort geändert, Sicherung gelöscht oder Gerät ausgetragen; bzw.
+ * Hinweis „umgezogen“). Die Schlüssel werden vergessen – die Einstellungen bleiben (Anzeige „Passwort nötig“).
+ */
+function handleForbidden(code, rejected, message = NEEDS_PASSWORD) {
   const current = loadKeys(code);
   // Inzwischen neue Schlüssel (z. B. Passwort in einem anderen Tab geändert): mit denen weiter.
   if (current && rejected && current.authToken !== rejected.authToken) {
     again = true;
     return;
   }
-  // Das abgelehnte Token nicht weiter verwenden.
   forgetKeys(code);
   updateConfig(code, (c) => {
     c.pendingCreate = false;
     delete c.pendingAdminHash;
   });
-  problem = { kind: 'needs-password', message: NEEDS_PASSWORD };
+  problem = { kind: 'needs-password', message };
 }
 
 async function handleError(code, keys, err) {
+  if (err instanceof CloudMovedError) return handleForbidden(code, keys, MOVED);
   if (err instanceof MailboxError) {
     if (err.status === 403) return handleForbidden(code, keys);
     if (err.status === 404) {
@@ -520,6 +604,11 @@ async function handleError(code, keys, err) {
     if (err.status === 429) {
       problem = { kind: 'locked', message: cloudErrorMessage(err) };
       scheduleRetry(Math.max(60, Number(err.data?.retryAfter) || 60) * 1000);
+      return;
+    }
+    if (err.status === 507) {
+      problem = { kind: 'error', message: cloudErrorMessage(err) };
+      scheduleRetry(STORAGE_FULL_RETRY_MS);
       return;
     }
     if (err.offline) {
@@ -598,8 +687,8 @@ export function activeCloudTeacher() {
 }
 
 /**
- * Vor dem Abmelden: noch nicht hochgeladene Änderungen sofort sichern und einen laufenden Abgleich abwarten
- * (höchstens `timeout` ms).
+ * Noch nicht hochgeladene Änderungen sofort sichern und einen laufenden Abgleich abwarten (höchstens `timeout` ms),
+ * z. B. vor dem Abmelden.
  * @returns {Promise<boolean>} true, wenn nichts mehr offen ist (oder keine Cloud-Sicherung eingerichtet ist)
  */
 export async function flushCloudSync({ timeout = 8000 } = {}) {
@@ -620,9 +709,11 @@ export async function flushCloudSync({ timeout = 8000 } = {}) {
 
 /** Fehler „mit diesem Passwort keine Cloud-Sicherung“ beim Entsperren. */
 export class CloudNotFoundError extends Error {
-  constructor() {
-    super('Mit diesem Passwort gibt es keine Cloud-Sicherung.');
+  constructor(moved = false) {
+    super(moved ? 'Das Passwort dieser Cloud-Sicherung wurde geändert.' : 'Mit diesem Passwort gibt es keine Cloud-Sicherung.');
     this.name = 'CloudNotFoundError';
+    /** true: Mit diesem (alten) Passwort gibt es nur noch den Hinweis „umgezogen“. */
+    this.moved = moved;
   }
 }
 
@@ -634,16 +725,40 @@ export class WrongPasswordError extends Error {
   }
 }
 
+async function keysFor(code, teacher, password) {
+  return { ...(await deriveCloudKeys(password, teacher)), device: deviceSecret(code) };
+}
+
 /**
- * Richtet eine neue Cloud-Sicherung mit dem Passwort ein und lädt den Stand dieses Geräts hoch (ohne Verbindung
+ * Richtet die Cloud-Sicherung mit dem Passwort ein und lädt den Stand dieses Geräts hoch (ohne Verbindung
  * später). Gibt es mit diesem Passwort schon eine, werden die beiden Stände abgeglichen.
  * @returns {Promise<object>} Zustand danach (wie getCloudStatus)
  */
 export async function setupCloud(teacher, password, { remember = true } = {}) {
   const code = teacher.teacherCode;
-  const keys = { ...(await deriveCloudKeys(password, teacher)), device: newDeviceSecret() };
+  const keys = await keysFor(code, teacher, password);
   const pendingAdminHash = await hashOf(keys.adminToken);
   return exclusive(async () => {
+    const existing = loadCloudConfig(code);
+    // Dieses Gerät war schon mit genau dieser Sicherung verbunden (z. B. erneute Registrierung): nur wieder
+    // eintragen und Version sowie Stand des letzten Abgleichs behalten.
+    if (existing && existing.syncId === keys.syncId && existing.version > 0 && !existing.pendingCreate) {
+      try {
+        const rec = await openCloudRecord(keys, keys.device);
+        if (rec.found) {
+          saveCloudConfig(code, { ...existing, remember });
+          saveKeys(code, keys, remember);
+          if (code === active) problem = null;
+          await syncRounds(code, { pull: true, keepalive: false });
+          return getCloudStatus(code);
+        }
+      } catch (err) {
+        if (!(err instanceof MailboxError) || !err.offline) throw err;
+        saveCloudConfig(code, { ...existing, remember });
+        saveKeys(code, keys, remember);
+        return getCloudStatus(code);
+      }
+    }
     saveCloudConfig(code, { syncId: keys.syncId, version: 0, dirty: true, syncedHash: '', pendingCreate: true, pendingAdminHash, syncedAt: '', remember });
     saveKeys(code, keys, remember);
     if (code === active) problem = null;
@@ -654,14 +769,20 @@ export async function setupCloud(teacher, password, { remember = true } = {}) {
 
 /**
  * Prüft das Passwort, trägt dieses Gerät ein und holt den Stand aus der Cloud – ohne ihn schon zu übernehmen
- * (siehe adoptCloud). Wirft CloudNotFoundError (kein Treffer: falsches Passwort oder keine Sicherung),
- * MailboxError 429 (zu viele Versuche) oder ohne Verbindung.
+ * (siehe adoptCloud). Wirft CloudNotFoundError (kein Treffer: falsches Passwort, keine Sicherung oder Passwort
+ * inzwischen geändert), MailboxError 429 (zu viele Versuche) oder ohne Verbindung.
  */
 export async function unlockCloud(teacher, password) {
-  const keys = { ...(await deriveCloudKeys(password, teacher)), device: newDeviceSecret() };
+  const keys = await keysFor(teacher.teacherCode, teacher, password);
   const rec = await openCloudRecord(keys, keys.device);
   if (!rec.found) throw new CloudNotFoundError();
-  const remote = unpackCloudData(await decryptCloudData(keys, rec));
+  let remote;
+  try {
+    remote = unpackCloudData(await decryptCloudData(keys, rec));
+  } catch (err) {
+    if (err instanceof CloudMovedError) throw new CloudNotFoundError(true);
+    throw err;
+  }
   return { keys, version: rec.version, updatedAt: rec.updatedAt, remote };
 }
 
@@ -690,11 +811,11 @@ export function unlockDecision(code, unlocked) {
 export function adoptCloud(teacher, unlocked, choice, { remember = true } = {}) {
   const code = teacher.teacherCode;
   return exclusive(async () => {
-    const remoteHash = contentHash(unlocked.remote.state);
+    const remoteHash = contentHash(unlocked.remote.state, unlocked.remote.eventDraft);
     saveCloudConfig(code, { syncId: unlocked.keys.syncId, version: unlocked.version, dirty: choice === 'local', syncedHash: remoteHash, pendingCreate: false, syncedAt: new Date().toISOString(), remember });
     saveKeys(code, unlocked.keys, remember);
     if (code === active) problem = null;
-    if (choice === 'remote') applyRemote(code, unlocked.remote, { version: unlocked.version, updatedAt: unlocked.updatedAt }, 'unlock');
+    if (choice === 'remote') applyRemote(code, unlocked.keys.syncId, unlocked.remote, { version: unlocked.version, updatedAt: unlocked.updatedAt }, 'unlock');
     else await syncRounds(code, { pull: false, keepalive: false });
     emitStatus();
     return getCloudStatus(code);
@@ -711,43 +832,87 @@ async function verifyPassword(code, teacher, password) {
 }
 
 /**
- * Neues Passwort: Der Stand wird unter dem neuen Passwort als neue Sicherung abgelegt, die bisherige gelöscht.
- * Andere Geräte fragen danach einmal nach dem neuen Passwort.
- * @returns {Promise<{oldLeft: boolean}>} oldLeft: die bisherige Sicherung konnte nicht gelöscht werden
+ * Zieht die Sicherung unter ein neues Passwort um: neue Sicherung mit dem (aktuellen) Stand anlegen, dann die alte
+ * löschen (mit Admin-Token) oder – ohne bisheriges Passwort bzw. wenn das Löschen scheitert – mit dem Hinweis
+ * „umgezogen“ überschreiben. Klappt beides nicht, wird die neue wieder gelöscht und nichts geändert.
+ * @returns {Promise<{oldLeft: boolean}>} oldLeft: die alte Sicherung wurde nicht gelöscht, nur ersetzt
  */
-export async function changeCloudPassword(teacher, currentPassword, newPassword) {
-  const code = teacher.teacherCode;
-  const { keys, derived: old } = await verifyPassword(code, teacher, currentPassword);
-  const fresh = { ...(await deriveCloudKeys(newPassword, teacher)), device: newDeviceSecret() };
-  if (fresh.syncId === old.syncId) throw new Error('Das neue Passwort ist dasselbe wie das bisherige.');
+async function moveCloud(code, teacher, newPassword, { oldAdminToken = null } = {}) {
+  const fresh = await keysFor(code, teacher, newPassword);
   const adminHash = await hashOf(fresh.adminToken);
   return exclusive(async () => {
+    const keys = loadKeys(code);
+    if (!keys) throw new Error('Die Cloud-Sicherung ist auf diesem Gerät nicht verbunden.');
+    if (fresh.syncId === keys.syncId) throw new Error('Das neue Passwort ist dasselbe wie das bisherige.');
+    // Zuerst auf den neuesten Stand bringen – sonst ginge verloren, was ein anderes Gerät eben gesichert hat.
+    await syncRounds(code, { pull: true, keepalive: false });
     const cfg = loadCloudConfig(code);
-    if (!cfg || cfg.pendingCreate) throw new Error('Ihr Stand ist noch nicht in der Cloud gesichert. Bitte versuchen Sie es gleich noch einmal.');
-    const sealed = await sealCurrent(code, fresh);
+    if (!cfg || !loadKeys(code) || cfg.pendingCreate || cfg.dirty || cfg.version === 0 || problem) {
+      throw new Error('Ihr Stand ist gerade nicht vollständig mit der Cloud abgeglichen (z. B. keine Verbindung). Bitte versuchen Sie es gleich noch einmal.');
+    }
+    const sealed = await sealCurrent(code, fresh, 1);
     if (!sealed) throw new Error('In diesem Browser ist kein Stand gespeichert.');
-    let res;
     try {
-      res = await createCloudRecord(fresh, sealed.data, adminHash);
+      await createCloudRecord(fresh, sealed.data, adminHash);
     } catch (err) {
       if (err instanceof MailboxError && err.status === 409) throw new Error('Mit diesem Passwort gibt es bereits eine andere Cloud-Sicherung. Bitte wählen Sie ein anderes Passwort.');
       throw err;
     }
-    saveCloudConfig(code, { syncId: fresh.syncId, version: res.version, dirty: false, syncedHash: sealed.hash, pendingCreate: false, syncedAt: new Date().toISOString(), remember: cfg.remember });
-    saveKeys(code, fresh, cfg.remember);
-    markSynced(code, res.version, sealed.hash);
-    let oldLeft = false;
+    const rollback = async (message) => {
+      await deleteCloudRecord(fresh, fresh.adminToken).catch(() => {});
+      throw new Error(message);
+    };
+    // Hat ein anderes Gerät die alte Sicherung inzwischen geändert? Dann nicht umziehen.
     try {
-      await deleteCloudRecord(keys, old.adminToken);
+      const check = await fetchCloudRecord(keys, { since: cfg.version });
+      if (!check.unchanged) await rollback('Ihr Stand wurde gerade auf einem anderen Gerät geändert. Bitte versuchen Sie es gleich noch einmal.');
     } catch (err) {
-      // Die alte Sicherung wird nach 400 Tagen ohne Nutzung ohnehin gelöscht.
-      console.warn(err);
-      oldLeft = true;
+      if (err instanceof MailboxError) await rollback(cloudErrorMessage(err));
+      throw err;
     }
+    let oldLeft = false;
+    let removed = false;
+    if (oldAdminToken) {
+      try {
+        removed = await deleteCloudRecord(keys, oldAdminToken);
+      } catch (err) {
+        console.warn(err);
+      }
+    }
+    if (!removed) {
+      // Hinweis „umgezogen“: Andere Geräte fragen dann nach dem neuen Passwort statt weiter die alte zu nutzen.
+      try {
+        await saveCloudRecord(keys, cfg.version, await encryptCloudData(keys, packMovedNotice(), cfg.version + 1));
+        oldLeft = true;
+      } catch (err) {
+        await rollback(`Die alte Cloud-Sicherung ließ sich nicht umstellen. ${err instanceof MailboxError ? cloudErrorMessage(err) : ''}`.trim());
+      }
+    }
+    saveCloudConfig(code, { syncId: fresh.syncId, version: 1, dirty: false, syncedHash: sealed.hash, pendingCreate: false, syncedAt: new Date().toISOString(), remember: cfg.remember });
+    saveKeys(code, fresh, cfg.remember);
+    markSynced(code, fresh.syncId, 1, sealed.hash);
     if (code === active) problem = null;
     emitStatus();
     return { oldLeft };
   });
+}
+
+/**
+ * Neues Passwort (das bisherige ist nötig). Andere Geräte fragen danach einmal nach dem neuen Passwort.
+ * @returns {Promise<{oldLeft: boolean}>}
+ */
+export async function changeCloudPassword(teacher, currentPassword, newPassword) {
+  const code = teacher.teacherCode;
+  const { derived: old } = await verifyPassword(code, teacher, currentPassword);
+  return moveCloud(code, teacher, newPassword, { oldAdminToken: old.adminToken });
+}
+
+/**
+ * „Passwort vergessen“ auf einem verbundenen Gerät: Die Sicherung zieht mit dem Stand dieses Geräts unter ein
+ * neues Passwort um; die alte bekommt den Hinweis „umgezogen“ (löschen lässt sie sich ohne Passwort nicht).
+ */
+export async function moveCloudToNewPassword(teacher, newPassword) {
+  return moveCloud(teacher.teacherCode, teacher, newPassword);
 }
 
 /** Löscht die Cloud-Sicherung beim Dienst (Passwort nötig) und auf diesem Gerät. Der Stand in diesem Browser bleibt. */

@@ -2,7 +2,7 @@
 // Öffnen, Passwort vergessen/ändern und Löschen, Konflikt-Dialog, Anzeige in der Kopfzeile und Karte unter
 // „Weitere Einstellungen“.
 
-import { h, mount, toast, modal, alertBox, friendlyError, plural } from '../core/ui.js';
+import { h, mount, toast, modal, alertBox, confirmDialog, friendlyError, plural } from '../core/ui.js';
 import { cloudEnabled, passwordProblem, cloudErrorMessage, cloudServiceReady, MIN_PASSWORD_LENGTH } from '../core/cloud.js';
 import {
   getCloudStatus,
@@ -13,17 +13,20 @@ import {
   syncCloudNow,
   loadCloudConfig,
   isCloudConnected,
+  forgetCloudOnDevice,
   setupCloud,
   unlockCloud,
   unlockDecision,
   adoptCloud,
   changeCloudPassword,
+  moveCloudToNewPassword,
   deleteCloud,
   CloudNotFoundError,
   WrongPasswordError,
 } from '../core/cloud-sync.js';
 import { MailboxError, isValidTeacherMailbox } from '../core/mailbox.js';
-import { loadTeacherState, getSession, isEmptyTeacherState, updateState } from '../core/storage.js';
+import { loadTeacherState, loadEventDraft, getSession, isEmptyTeacherState, updateState } from '../core/storage.js';
+import { downloadBackup } from '../core/backup.js';
 import { formatTimestamp } from '../core/time.js';
 
 const READY_TIMEOUT_MS = 8000;
@@ -92,6 +95,9 @@ export function passwordField({ id, label, hint = '', autocomplete = 'new-passwo
   const setError = (message) => {
     error.textContent = message || '';
     error.hidden = !message;
+    // Als Meldung ansagen – der Fokus bleibt oft im Feld (Absenden mit Enter), dann käme sie sonst nicht an.
+    if (message) error.setAttribute('role', 'alert');
+    else error.removeAttribute('role');
     if (message) input.setAttribute('aria-invalid', 'true');
     else input.removeAttribute('aria-invalid');
     describe(Boolean(message));
@@ -217,7 +223,8 @@ function stateSummary(state) {
 
 /**
  * Welcher Stand soll gelten? Beide Stände unterscheiden sich; der andere wird überschrieben.
- * Empfohlen wird der Stand mit Inhalt, bei zwei gefüllten der neuere.
+ * Empfohlen wird der Stand mit Inhalt; bei zwei gefüllten nach einem echten Konflikt der neuere, ohne gemeinsamen
+ * Stand (context 'login': Gerät gerade verbunden) die Cloud-Sicherung.
  * @param {{local:{state:object}, remote:{state:object}, context:'login'|'sync'}} opts
  * @returns {Promise<'local'|'remote'>}
  */
@@ -226,7 +233,21 @@ export function openConflictDialog({ local, remote, context = 'sync' }) {
   const remoteEmpty = isEmptyTeacherState(remote.state);
   const localAt = Date.parse(local.state?.savedAt) || 0;
   const remoteAt = Date.parse(remote.state?.savedAt) || 0;
-  const recommendRemote = localEmpty !== remoteEmpty ? localEmpty : remoteAt >= localAt;
+  const recommendRemote = localEmpty !== remoteEmpty ? localEmpty : context === 'login' || remoteAt >= localAt;
+  const backupBtn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'btn btn-secondary btn-small',
+      'data-testid': 'cloud-conflict-backup',
+      onclick: (e) => {
+        if (isRepeat(e)) return;
+        const name = downloadBackup(local.state, { eventDraft: loadEventDraft(local.state) });
+        toast(`Stand dieses Geräts gespeichert: „${name}“`, 'success', 6000);
+      },
+    },
+    'Stand dieses Geräts als Zwischenstand speichern',
+  );
   const option = (which, title, state, recommended) =>
     h(
       'div',
@@ -252,14 +273,15 @@ export function openConflictDialog({ local, remote, context = 'sync' }) {
           : 'Ihr Stand wurde auf einem anderen Gerät geändert, während hier noch nicht gesicherte Änderungen vorlagen.',
       ),
       h('div', { class: 'cloud-choices' }, option('remote', 'Cloud-Sicherung', remote.state, recommendRemote), option('local', 'Dieses Gerät', local.state, !recommendRemote)),
-      h('p', { class: 'muted small' }, 'Der andere Stand wird dabei überschrieben. Tipp: Sind Sie unsicher, speichern Sie vorher oben einen Zwischenstand – er enthält den Stand dieses Geräts.'),
+      h('p', { class: 'muted small' }, 'Der andere Stand wird dabei überschrieben. Sind Sie unsicher, speichern Sie vorher den Stand dieses Geräts als Datei – mit „Zwischenstand laden“ lässt er sich später wiederherstellen.'),
+      h('div', {}, backupBtn),
       differentMailboxes
         ? alertBox(
             'warning',
             h(
               'p',
               { 'data-testid': 'cloud-conflict-mailbox' },
-              'Die beiden Stände haben verschiedene digitale Briefkästen. Rückmeldungen im Briefkasten des Stands, den Sie nicht wählen, lassen sich danach nur noch mit einem Zwischenstand dieses Stands lesen.',
+              'Die beiden Stände haben verschiedene digitale Briefkästen. Rückmeldungen im Briefkasten des Stands, den Sie nicht wählen, lassen sich danach nur noch mit einem Zwischenstand dieses Stands lesen – speichern Sie deshalb vorher den Stand dieses Geräts.',
             ),
           )
         : null,
@@ -344,17 +366,25 @@ async function adoptAfterUnlock(teacher, unlocked, remember) {
  * Dialog „Passwort eingeben“: öffnet die Cloud-Sicherung auf diesem Gerät.
  * @param {{teacher:object, message?:string, allowSkip?:boolean, offerSetup?:boolean}} opts
  *   offerSetup: Link „Noch keine Cloud-Sicherung? Jetzt einrichten“ (schließt mit 'setup')
- * @returns {Promise<'unlocked'|'created'|'setup'|'skipped'|undefined>}
+ * @returns {Promise<'unlocked'|'created'|'setup'|'skipped'|'disconnected'|undefined>}
  */
 export function openUnlockDialog({ teacher, message = '', allowSkip = false, offerSetup = false }) {
   const pw = passwordField({ id: 'cloud-unlock-password', label: 'Passwort für die Cloud-Sicherung', autocomplete: 'current-password' });
-  // Auf einem weiteren Gerät (evtl. fremd) wird das Passwort nur gemerkt, wenn die Lehrkraft das möchte.
-  const remember = rememberCheckbox('cloud-unlock', { checked: false });
+  // Auf einem weiteren Gerät (evtl. fremd) wird das Passwort nur gemerkt, wenn die Lehrkraft das möchte; war dieses
+  // Gerät schon verbunden, gilt die bisherige Wahl.
+  const cfg = loadCloudConfig(teacher.teacherCode);
+  const remember = rememberCheckbox('cloud-unlock', { checked: cfg ? cfg.remember : false });
   let dlg = null;
   const forgot = linkButton('Passwort vergessen?', 'cloud-forgot', async () => {
     const result = await openForgotDialog({ teacher });
     if (result === 'created') dlg.close('created');
   });
+  // Eingerichtet, aber das Passwort passt nicht mehr (z. B. Sicherung auf einem anderen Gerät gelöscht): lösen.
+  const disconnect = cfg
+    ? linkButton('Cloud-Sicherung auf diesem Gerät nicht mehr verwenden', 'cloud-unlock-disconnect', async () => {
+        if (await confirmDisconnect(teacher)) dlg.close('disconnected');
+      })
+    : null;
   dlg = formDialog({
     title: 'Passwort eingeben',
     testId: 'cloud-unlock-dialog',
@@ -373,6 +403,7 @@ export function openUnlockDialog({ teacher, message = '', allowSkip = false, off
         { class: 'small cloud-links' },
         forgot,
         offerSetup ? [' · ', linkButton('Noch keine Cloud-Sicherung? Jetzt einrichten', 'cloud-unlock-setup', () => dlg.close('setup'))] : null,
+        disconnect ? [' · ', disconnect] : null,
       ),
     ),
     onSubmit: async ({ close }) => {
@@ -388,7 +419,9 @@ export function openUnlockDialog({ teacher, message = '', allowSkip = false, off
       } catch (err) {
         if (err instanceof CloudNotFoundError) {
           pw.setError(
-            `Mit diesem Passwort gibt es keine Cloud-Sicherung. Bitte prüfen Sie das Passwort, auch Groß- und Kleinschreibung${offerSetup ? ' – oder richten Sie eine neue Cloud-Sicherung ein' : ''}.`,
+            err.moved
+              ? 'Das Passwort dieser Cloud-Sicherung wurde inzwischen auf einem anderen Gerät geändert. Bitte geben Sie das neue Passwort ein.'
+              : `Mit diesem Passwort gibt es keine Cloud-Sicherung. Bitte prüfen Sie das Passwort, auch Groß- und Kleinschreibung${offerSetup ? ' – oder richten Sie eine neue Cloud-Sicherung ein' : ''}.`,
           );
           pw.input.select();
           return;
@@ -405,34 +438,89 @@ export function openUnlockDialog({ teacher, message = '', allowSkip = false, off
 
 // ---------- Passwort vergessen ----------
 
+/** Rückfrage „Cloud-Sicherung auf diesem Gerät nicht mehr verwenden“. Gibt true zurück, wenn gelöst. */
+async function confirmDisconnect(teacher) {
+  const ok = await confirmDialog({
+    title: 'Cloud-Sicherung nicht mehr verwenden?',
+    message: 'Dieses Gerät gleicht dann nicht mehr mit der Cloud-Sicherung ab. Ihr Stand in diesem Browser bleibt erhalten. Die Cloud-Sicherung selbst wird dadurch nicht gelöscht.',
+    confirmText: 'Nicht mehr verwenden',
+  });
+  if (!ok) return false;
+  forgetCloudOnDevice(teacher.teacherCode);
+  toast('Dieses Gerät verwendet die Cloud-Sicherung nicht mehr.', 'info');
+  return true;
+}
+
 /**
- * Erklärt, was ohne Passwort möglich ist, und bietet eine neue Cloud-Sicherung mit neuem Passwort an.
+ * Erklärt, was ohne Passwort möglich ist. Auf einem verbundenen Gerät zieht die Sicherung mit dem Stand dieses
+ * Geräts unter ein neues Passwort um (andere Geräte fragen dann nach dem neuen); sonst entsteht eine neue
+ * Sicherung mit neuem Passwort.
  * @returns {Promise<'created'|undefined>}
  */
 export function openForgotDialog({ teacher }) {
-  const local = loadTeacherState(teacher.teacherCode);
+  const code = teacher.teacherCode;
+  const local = loadTeacherState(code);
   const empty = isEmptyTeacherState(local);
+  const connected = isCloudConnected(code);
   const dlg = modal({
     title: 'Passwort vergessen?',
     content: h(
       'div',
       { class: 'stack-small', 'data-testid': 'cloud-forgot-dialog' },
       h('p', {}, 'Ohne Ihr Passwort lässt sich Ihre Cloud-Sicherung nicht öffnen – auch nicht von ParentsDay. Das schützt Ihre Daten.'),
-      h(
-        'p',
-        {},
-        'Sie können aber eine neue Cloud-Sicherung mit einem neuen Passwort einrichten. Sie beginnt mit dem Stand dieses Geräts. Die alte Sicherung wird nach 400 Tagen ohne Nutzung automatisch gelöscht.',
-      ),
-      empty
-        ? alertBox('warning', h('p', {}, h('strong', {}, 'Auf diesem Gerät sind noch keine Daten gespeichert. '), 'Richten Sie die neue Cloud-Sicherung am besten an dem Gerät ein, an dem Sie zuletzt gearbeitet haben.'))
-        : h('p', { class: 'muted small' }, `Stand dieses Geräts: ${stateSummary(local)}.`),
+      connected
+        ? h(
+            'p',
+            {},
+            'Dieses Gerät ist aber noch mit Ihrer Cloud-Sicherung verbunden. Sie können hier ein neues Passwort festlegen: Ihr Stand zieht dann in eine neue Sicherung um. Ihre anderen Geräte fragen danach einmal nach dem neuen Passwort – nichts geht verloren.',
+          )
+        : [
+            h(
+              'p',
+              {},
+              'Ist Ihr Passwort noch auf einem anderen Gerät gemerkt, wählen Sie am besten dort „Passwort vergessen?“ (unter „Weitere Einstellungen“) – dann werden alle Geräte umgestellt und nichts geht verloren.',
+            ),
+            h(
+              'p',
+              {},
+              'Sonst können Sie hier eine neue Cloud-Sicherung mit neuem Passwort einrichten. Sie beginnt mit dem Stand dieses Geräts. Die alte wird nach 400 Tagen ohne Nutzung automatisch gelöscht; Geräte, die noch mit ihr verbunden sind, verbinden Sie dort mit „Passwort vergessen?“ bzw. dem neuen Passwort.',
+            ),
+            empty
+              ? alertBox('warning', h('p', {}, h('strong', {}, 'Auf diesem Gerät sind noch keine Daten gespeichert. '), 'Richten Sie die neue Cloud-Sicherung am besten an dem Gerät ein, an dem Sie zuletzt gearbeitet haben.'))
+              : h('p', { class: 'muted small' }, `Stand dieses Geräts: ${stateSummary(local)}.`),
+          ],
     ),
     actions: [
       { label: 'Abbrechen', value: undefined, testId: 'cloud-forgot-cancel' },
-      { label: 'Neue Cloud-Sicherung einrichten', variant: 'primary', value: 'setup', testId: 'cloud-forgot-setup' },
+      connected
+        ? { label: 'Neues Passwort festlegen', variant: 'primary', value: 'move', testId: 'cloud-forgot-move' }
+        : { label: 'Neue Cloud-Sicherung einrichten', variant: 'primary', value: 'setup', testId: 'cloud-forgot-setup' },
     ],
   });
-  return dlg.result.then((v) => (v === 'setup' ? openSetupDialog({ teacher }) : undefined)).then((v) => (v === 'created' ? 'created' : undefined));
+  return dlg.result
+    .then((v) => (v === 'setup' ? openSetupDialog({ teacher }) : v === 'move' ? openMoveDialog(teacher) : undefined))
+    .then((v) => (v === 'created' ? 'created' : undefined));
+}
+
+/** Neues Passwort ohne das bisherige – nur auf einem verbundenen Gerät („Passwort vergessen?“). */
+function openMoveDialog(teacher) {
+  const pw = newPasswordFields('cloud-move', { label: 'Neues Passwort' });
+  return formDialog({
+    title: 'Neues Passwort festlegen',
+    testId: 'cloud-move-dialog',
+    submitLabel: 'Neues Passwort festlegen',
+    submitTestId: 'cloud-move-submit',
+    busyLabel: 'Wird umgestellt …',
+    buttons: [{ label: 'Abbrechen', value: undefined }],
+    body: h('div', { class: 'stack-small' }, h('p', {}, 'Ihr aktueller Stand wird mit dem neuen Passwort gesichert. Auf Ihren anderen Geräten geben Sie danach einmal das neue Passwort ein.'), pw.wraps),
+    onSubmit: async ({ close }) => {
+      const password = pw.check();
+      if (!password) return;
+      await moveCloudToNewPassword(teacher, password);
+      toast('Das neue Passwort gilt ab sofort. Ihre anderen Geräte fragen einmal danach.', 'success', 7000);
+      close('created');
+    },
+  }).result;
 }
 
 // ---------- Passwort ändern und löschen ----------
@@ -440,7 +528,8 @@ export function openForgotDialog({ teacher }) {
 export function openChangePasswordDialog(teacher) {
   const current = passwordField({ id: 'cloud-change-current', label: 'Bisheriges Passwort', autocomplete: 'current-password' });
   const pw = newPasswordFields('cloud-newpw', { label: 'Neues Passwort' });
-  return formDialog({
+  let dlg = null;
+  dlg = formDialog({
     title: 'Passwort ändern',
     testId: 'cloud-change-dialog',
     submitLabel: 'Passwort ändern',
@@ -452,6 +541,14 @@ export function openChangePasswordDialog(teacher) {
       { class: 'stack-small' },
       h('p', {}, 'Ihr Stand wird mit dem neuen Passwort neu verschlüsselt. Auf Ihren anderen Geräten geben Sie danach einmal das neue Passwort ein.'),
       current.wrap,
+      h(
+        'p',
+        { class: 'small' },
+        linkButton('Bisheriges Passwort vergessen?', 'cloud-change-forgot', async () => {
+          dlg.close();
+          await openForgotDialog({ teacher });
+        }),
+      ),
       pw.wraps,
     ),
     onSubmit: async ({ close }) => {
@@ -475,7 +572,8 @@ export function openChangePasswordDialog(teacher) {
       }
       close('changed');
     },
-  }).result;
+  });
+  return dlg.result;
 }
 
 export function openDeleteCloudDialog(teacher) {
@@ -492,7 +590,7 @@ export function openDeleteCloudDialog(teacher) {
       'div',
       { class: 'stack-small' },
       h('p', {}, 'Ihre Cloud-Sicherung wird vom Server gelöscht. Der Stand in diesem Browser bleibt erhalten.'),
-      h('p', {}, 'Auf anderen Geräten bleibt der dort gespeicherte Stand ebenfalls erhalten, wird aber nicht mehr abgeglichen. Zum Weiterarbeiten an einem anderen Gerät brauchen Sie dann wieder eine Zwischenspeicher-Datei.'),
+      h('p', {}, 'Auf anderen Geräten bleibt der dort gespeicherte Stand ebenfalls erhalten, wird aber nicht mehr abgeglichen – dort erscheint einmal „Passwort nötig“; mit „Cloud-Sicherung auf diesem Gerät nicht mehr verwenden“ lösen Sie das Gerät. Zum Weiterarbeiten an einem anderen Gerät brauchen Sie dann wieder eine Zwischenspeicher-Datei.'),
       pw.wrap,
     ),
     onSubmit: async ({ close }) => {
@@ -680,6 +778,8 @@ export function cloudSettingsCard(teacher) {
     body,
   );
   let lastKey = '';
+  const title = card.querySelector('h2');
+  title.setAttribute('tabindex', '-1');
   const button = (label, testId, onClick, variant = 'secondary') =>
     h(
       'button',
@@ -691,6 +791,9 @@ export function cloudSettingsCard(teacher) {
           if (isRepeat(e)) return;
           await onClick();
           render(getCloudStatus(teacher.teacherCode));
+          // Der Knopf kann inzwischen neu aufgebaut worden sein: Fokus auf den neuen (oder die Überschrift)
+          const focus = document.activeElement;
+          if (!focus || focus === document.body || !focus.isConnected) (body.querySelector(`[data-testid="${testId}"]`) || title).focus();
         },
       },
       label,
@@ -729,6 +832,7 @@ export function cloudSettingsCard(teacher) {
           { class: 'evt-mailbox-actions' },
           button('Passwort eingeben', 'cloud-unlock', () => openUnlockDialog({ teacher, message: status.message }), 'primary'),
           button('Passwort vergessen?', 'cloud-card-forgot', () => openForgotDialog({ teacher })),
+          button('Nicht mehr verwenden', 'cloud-card-disconnect', () => confirmDisconnect(teacher)),
         ),
       );
     } else {
@@ -752,6 +856,7 @@ export function cloudSettingsCard(teacher) {
             if (after.kind === 'ok') toast('Ihr Stand ist in der Cloud gesichert.', 'success');
           }),
           button('Passwort ändern', 'cloud-change-password', () => openChangePasswordDialog(teacher)),
+          button('Passwort vergessen?', 'cloud-card-forgot', () => openForgotDialog({ teacher })),
           button('Cloud-Sicherung löschen', 'cloud-delete', () => openDeleteCloudDialog(teacher)),
         ),
         h('p', { class: 'muted small' }, 'Ende-zu-Ende-verschlüsselt: Ihr Passwort verlässt diesen Browser nie. Ohne das Passwort kann niemand die Sicherung lesen – auch nicht ParentsDay.'),
@@ -781,7 +886,7 @@ function onTeacherPage() {
 export function installCloudUi({ rerender }) {
   if (installed) return;
   installed = true;
-  setConflictResolver(({ local, remote }) => openConflictDialog({ local, remote, context: 'sync' }));
+  setConflictResolver(({ local, remote, noBase }) => openConflictDialog({ local, remote, context: noBase ? 'login' : 'sync' }));
   let waiting = false;
   onRemoteApplied(({ source }) => {
     if (!getSession() || !onTeacherPage()) return;
