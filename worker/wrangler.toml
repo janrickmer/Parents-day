@@ -1,0 +1,14 @@
+# Optional: Veröffentlichung per Kommandozeile (npx wrangler deploy im Ordner worker/).
+# Die Einrichtung über das Cloudflare-Dashboard ist in docs/BRIEFKASTEN.md beschrieben.
+name = "parentsday-briefkasten"
+main = "briefkasten.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://parentsday.janrickmer.de"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "parentsday"
+# Nach `npx wrangler d1 create parentsday` die ausgegebene ID hier eintragen:
+database_id = "HIER-DIE-DATENBANK-ID-EINTRAGEN"

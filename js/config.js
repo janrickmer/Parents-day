@@ -3,6 +3,13 @@
 /** Öffentliche Adresse der Seite. Wird in Elternbriefe und QR-Codes gedruckt. */
 export const PUBLIC_URL = 'https://parentsday.janrickmer.de';
 
+/**
+ * Adresse des digitalen Briefkastens (Cloudflare Worker, siehe docs/BRIEFKASTEN.md), z. B.
+ * 'https://parentsday-briefkasten.<name>.workers.dev'. Leer = kein Briefkasten: Eltern schicken ihre
+ * Rückmeldung dann als PDF bzw. E-Mail-Text. Die Adresse muss auch in index.html bei connect-src stehen.
+ */
+export const MAILBOX_URL = '';
+
 /** Anzeigename – immer mit großem „D“. */
 export const APP_NAME = 'ParentsDay';
 

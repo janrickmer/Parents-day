@@ -7,6 +7,7 @@
 import { PUBLIC_URL } from '../config.js';
 import { toMinutes, fromMinutes, cleanAvailability } from './time.js';
 import { teacherCodeKey } from './codes.js';
+import { isValidMailboxRef, publicMailboxRef } from './mailbox.js';
 
 // ---------- Base64url (UTF-8) ----------
 
@@ -35,6 +36,7 @@ export function decodeBase64Url(text) {
  */
 export function eventInfoFromState(state, classId) {
   const t = state.teacher;
+  const mailbox = publicMailboxRef(state.mailbox);
   return {
     teacherName: `${t.firstName} ${t.lastName}`.trim(),
     teacherEmail: t.email || '',
@@ -43,11 +45,13 @@ export function eventInfoFromState(state, classId) {
     slotMinutes: state.event?.slotMinutes || 10,
     days: (state.event?.days || []).map((d) => ({ ...d })),
     classId: classId || '',
+    ...(mailbox ? { mailbox } : {}),
     source: 'link',
   };
 }
 
-function compactEvent(info) {
+/** Kompakte Form für Link/QR-Code (b/p: digitaler Briefkasten, nur wenn vorhanden). */
+export function compactEvent(info) {
   return {
     v: 1,
     n: info.teacherName,
@@ -57,12 +61,32 @@ function compactEvent(info) {
     s: info.slotMinutes,
     d: info.days.map((d) => [d.date, d.start, d.end]),
     k: info.classId,
+    ...(isValidMailboxRef(info.mailbox) ? { b: info.mailbox.id, p: info.mailbox.publicKey } : {}),
   };
 }
 
 /** Link für den Elternbrief/QR-Code. */
 export function eventLink(state, classId) {
   return `${PUBLIC_URL}/#/eltern?e=${encodeBase64Url(compactEvent(eventInfoFromState(state, classId)))}`;
+}
+
+/** Kompaktes Event (Inhalt von e=) → EventInfo. Wirft bei ungültigen Daten. */
+export function eventInfoFromCompact(raw, source = 'link') {
+  if (!raw || raw.v !== 1 || !Array.isArray(raw.d) || raw.d.length === 0) {
+    throw new Error('Der Link aus dem Elternbrief ist unvollständig oder beschädigt.');
+  }
+  const mailbox = { id: String(raw.b || ''), publicKey: String(raw.p || '') };
+  return {
+    teacherName: String(raw.n || ''),
+    teacherEmail: String(raw.m || ''),
+    teacherCode: String(raw.t || ''),
+    schoolAddress: String(raw.a || ''),
+    slotMinutes: Number(raw.s) || 10,
+    days: raw.d.map((d) => (Array.isArray(d) ? { date: d[0], start: d[1], end: d[2] } : { date: '', start: '', end: '' })),
+    classId: String(raw.k || ''),
+    ...(isValidMailboxRef(mailbox) ? { mailbox } : {}),
+    source,
+  };
 }
 
 /** Liest den Parameter e= aus dem Elternbrief-Link. Wirft einen Fehler bei ungültigen Daten. */
@@ -73,19 +97,7 @@ export function decodeEventParam(param) {
   } catch {
     throw new Error('Der Link aus dem Elternbrief ist unvollständig oder beschädigt.');
   }
-  if (!raw || raw.v !== 1 || !Array.isArray(raw.d) || raw.d.length === 0) {
-    throw new Error('Der Link aus dem Elternbrief ist unvollständig oder beschädigt.');
-  }
-  return {
-    teacherName: String(raw.n || ''),
-    teacherEmail: String(raw.m || ''),
-    teacherCode: String(raw.t || ''),
-    schoolAddress: String(raw.a || ''),
-    slotMinutes: Number(raw.s) || 10,
-    days: raw.d.map(([date, start, end]) => ({ date, start, end })),
-    classId: String(raw.k || ''),
-    source: 'link',
-  };
+  return eventInfoFromCompact(raw, 'link');
 }
 
 // ---------- Termin-Schlüssel (abtippbar, Crockford-Base32) ----------

@@ -23,12 +23,17 @@
 //       },
 //       appointment: null | { date: 'JJJJ-MM-TT', start: 'HH:MM', duration: number }  // Dauer in Minuten
 //     }]
-//   }]
+//   }],
+//   mailbox: null | {                            // digitaler Briefkasten (siehe core/mailbox.js)
+//     v: 1, id, secret, publicKey, privateKey: JWK, createdAt,
+//     lastFetchedAt?: ISO-Zeitstempel            // letzter erfolgreicher Abruf
+//   }
 // }
 
 import { APP_NAME, DATA_VERSION, MAX_EVENT_DAYS, SLOT_MIN, SLOT_MAX } from '../config.js';
 import { isValidIsoDate, codesEqual } from './codes.js';
 import { isValidTime, toMinutes, cleanAvailability } from './time.js';
+import { isValidTeacherMailbox } from './mailbox.js';
 
 const TEACHER_PREFIX = 'parentsday.teacher.';
 const SESSION_KEY = 'parentsday.session';
@@ -117,6 +122,7 @@ export function createTeacherState(teacher) {
     teacher: { ...teacher },
     event: null,
     classes: [],
+    mailbox: null,
   };
 }
 
@@ -347,9 +353,26 @@ export function normalizeTeacherState(raw) {
     },
     event: normalizeEvent(raw.event),
     classes: normalizeClasses(raw.classes),
+    mailbox: normalizeMailbox(raw.mailbox),
   };
   sortClasses(state);
   return state;
+}
+
+/** Briefkasten der Lehrkraft: nur vollständige, gültige Angaben übernehmen. */
+function normalizeMailbox(mb) {
+  if (!isValidTeacherMailbox(mb)) return null;
+  const { kty, crv, x, y, d } = mb.privateKey;
+  const lastFetchedAt = text(mb.lastFetchedAt, 40);
+  return {
+    v: 1,
+    id: mb.id,
+    secret: mb.secret,
+    publicKey: mb.publicKey,
+    privateKey: { kty, crv, x: text(x, 100), y: text(y, 100), d: text(d, 100), ext: true, key_ops: ['deriveBits'] },
+    createdAt: text(mb.createdAt, 40),
+    ...(lastFetchedAt && !Number.isNaN(Date.parse(lastFetchedAt)) ? { lastFetchedAt } : {}),
+  };
 }
 
 // --- Noch nicht gespeicherte Eingaben auf „Elternsprechtag erstellen“ / „Weitere Einstellungen“ ---

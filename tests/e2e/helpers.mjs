@@ -20,8 +20,12 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-/** Startet einen statischen Webserver für das Projekt. Unbekannte Pfade liefern wie GitHub Pages die 404.html. */
-export async function startServer() {
+/**
+ * Startet einen statischen Webserver für das Projekt. Unbekannte Pfade liefern wie GitHub Pages die 404.html.
+ * Mit `mailboxUrl` wird die Seite so ausgeliefert, als wäre dieser digitale Briefkasten eingerichtet
+ * (MAILBOX_URL in js/config.js und connect-src der Content-Security-Policy in index.html).
+ */
+export async function startServer({ mailboxUrl = '' } = {}) {
   const server = http.createServer(async (req, res) => {
     try {
       const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -29,7 +33,13 @@ export async function startServer() {
       if (!file.startsWith(ROOT)) throw new Error('forbidden');
       const stat = await fs.stat(file).catch(() => null);
       if (stat?.isDirectory()) file = path.join(file, 'index.html');
-      const data = await fs.readFile(file);
+      let data = await fs.readFile(file);
+      if (mailboxUrl && file === path.join(ROOT, 'js/config.js')) {
+        data = Buffer.from(data.toString('utf8').replace(/export const MAILBOX_URL = '[^']*';/, `export const MAILBOX_URL = '${mailboxUrl}';`));
+      }
+      if (mailboxUrl && file === path.join(ROOT, 'index.html')) {
+        data = Buffer.from(data.toString('utf8').replace(/connect-src ([^;"]*)/, (m, list) => `connect-src ${list.replace(/\S*workers\.dev\S*/g, '').trim()} ${new URL(mailboxUrl).origin}`));
+      }
       res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
       res.end(data);
     } catch {
