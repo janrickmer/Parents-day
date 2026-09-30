@@ -562,9 +562,10 @@ function applyRemote(code, syncId, remote, rec, source = 'sync') {
   applyingRemote = true;
   try {
     saved = replaceState(next, { keepSavedAt: true });
-    // Entwurf wie in der Cloud – auch keiner (sonst käme ein anderswo verworfener Entwurf zurück).
+    // Entwurf wie in der Cloud – beim Abgleich im Hintergrund auch keiner (sonst käme ein anderswo verworfener
+    // Entwurf zurück). Beim Entsperren bleibt ein Entwurf dieses Geräts erhalten und wird hochgeladen.
     if (remote.eventDraft) storeEventDraft(saved, remote.eventDraft);
-    else clearEventDraft(saved);
+    else if (source === 'sync') clearEventDraft(saved);
   } finally {
     applyingRemote = false;
   }
@@ -881,7 +882,9 @@ async function moveCloud(code, teacher, newPassword, { oldAdminToken = null } = 
       await saveCloudRecord(keys, cfg.version, await encryptCloudData(keys, packMovedNotice(), cfg.version + 1));
       moved = true;
     } catch (err) {
-      const verdict = await oldRecordState(keys, cfg.version);
+      // Abgelehnt (409: inzwischen geändert, 403: kein Zugang mehr): nachweislich nicht umgestellt. Nur wenn die
+      // Antwort verloren ging (keine Verbindung), wird nachgesehen, ob es doch geklappt hat.
+      const verdict = err instanceof MailboxError && err.offline ? await oldRecordState(keys, cfg.version) : 'changed';
       if (verdict === 'moved' || verdict === 'gone') moved = true;
       else if (verdict === 'unchanged' || verdict === 'changed' || (err instanceof MailboxError && err.status === 409)) {
         // Die bisherige Sicherung ist nachweislich noch in Gebrauch: die neue wieder löschen.

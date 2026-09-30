@@ -452,7 +452,7 @@ function cloudRegisterNote(cloud) {
   if (cloud === 'created') return note('success', 'Cloud-Sicherung eingerichtet. ', 'Ihr Stand wird ab jetzt automatisch gesichert. An einem anderen Gerät melden Sie sich an und geben Ihr Passwort ein.');
   if (cloud === 'restored') return note('success', 'Ihre Cloud-Sicherung wurde geladen. ', 'Mit diesem Passwort gab es schon eine Cloud-Sicherung – Ihr Stand ist jetzt auch auf diesem Gerät.');
   if (cloud === 'kept') return note('info', 'Ihre Cloud-Sicherung bleibt verbunden. ', 'Dieses Gerät war schon mit Ihrer Cloud-Sicherung verbunden; daran ändert die erneute Registrierung nichts.');
-  if (cloud === 'failed') return note('warning', 'Die Cloud-Sicherung konnte nicht eingerichtet werden. ', 'Sie können sie später oben über „Cloud-Sicherung einrichten“ oder unter „Weitere Einstellungen“ einrichten.');
+  if (cloud === 'failed') return note('warning', 'Die Cloud-Sicherung konnte noch nicht angelegt werden. ', 'Der Dienst lässt es gerade nicht zu (z. B. zu viele Versuche). ParentsDay holt das Einrichten später automatisch nach – den Zustand sehen Sie oben in der Kopfzeile.');
   if (cloud === 'moved') {
     return note(
       'warning',

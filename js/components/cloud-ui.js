@@ -333,13 +333,15 @@ export function openSetupDialog({ teacher, allowLater = false, intro = '', offer
       const before = loadTeacherState(teacher.teacherCode);
       const status = await setupCloud(teacher, password, { remember: remember.input.checked });
       if (status.kind === 'needs-password') {
-        // Mit diesem Passwort gab es eine Sicherung, deren Passwort inzwischen geändert wurde.
-        close('unlock-needed');
-        await openUnlockDialog({ teacher, message: status.message });
+        // Mit diesem Passwort gab es eine Sicherung, deren Passwort inzwischen geändert wurde: nach dem aktuellen fragen.
+        const result = await openUnlockDialog({ teacher, message: status.message });
+        close(result === 'unlocked' ? 'created' : undefined);
         return;
       }
       if (status.kind === 'locked' || status.kind === 'error') {
-        showError(status.message || 'Die Cloud-Sicherung konnte nicht eingerichtet werden. Bitte versuchen Sie es später noch einmal.');
+        // Eingerichtet ist sie auf diesem Gerät schon – angelegt wird sie, sobald der Dienst es zulässt.
+        toast(`${status.message || 'Die Cloud-Sicherung konnte noch nicht angelegt werden.'} ParentsDay holt das Einrichten später automatisch nach.`, 'warning', 10000);
+        close('created');
         return;
       }
       announceSetup(status, before, loadTeacherState(teacher.teacherCode));
