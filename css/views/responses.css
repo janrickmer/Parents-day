@@ -58,8 +58,88 @@
   display: none;
 }
 
+/* ---------- Digitaler Briefkasten (nur mit MAILBOX_URL) ---------- */
+
+.resp-section-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+.resp-mailbox {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--c-border);
+  border-left: 5px solid var(--c-primary);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+.resp-mailbox > * {
+  margin: 0;
+}
+.resp-mailbox-text {
+  max-width: 760px;
+}
+.resp-mailbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.resp-mailbox-btn {
+  white-space: normal;
+  text-align: center;
+}
+.resp-mailbox-btn[aria-disabled='true'] {
+  cursor: progress;
+}
+/* Auf dem hellen Knopf ist der Ring des Standard-Spinners (weiß) nicht sichtbar */
+.resp-mailbox-spinner {
+  width: 16px;
+  height: 16px;
+  border-color: var(--c-border);
+  border-top-color: currentColor;
+}
+.resp-mailbox-last {
+  margin: 0;
+  color: var(--c-muted);
+}
+.resp-mailbox-note:empty {
+  display: none;
+}
+.resp-mailbox-note p {
+  margin: 0;
+}
+.resp-mailbox-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 12px;
+  border-radius: var(--radius-small);
+  background: var(--c-warning-soft);
+  border: 1px solid #f5cf9f;
+  font-size: 0.9rem;
+}
+.resp-mailbox-error p {
+  flex: 1 1 260px;
+}
+.resp-mailbox-unreadable {
+  color: var(--c-muted);
+}
+.resp-email {
+  margin-top: 22px;
+}
+.resp-email > .resp-section-title {
+  margin-bottom: 10px;
+}
+
 @media (max-width: 520px) {
-  .resp-paste-btn {
+  .resp-paste-btn,
+  .resp-mailbox-btn {
     width: 100%;
+  }
+  .resp-mailbox {
+    padding: 12px;
   }
 }

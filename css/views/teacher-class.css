@@ -172,6 +172,10 @@
 .tc-feedback p {
   margin-bottom: 4px;
 }
+/* z. B. Warnung zum digitalen Briefkasten unter der Erfolgsmeldung */
+.tc-feedback > .alert + .alert {
+  margin-top: 10px;
+}
 .tc-problems {
   margin: 4px 0 0;
   padding-left: 20px;

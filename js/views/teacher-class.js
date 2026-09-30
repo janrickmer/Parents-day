@@ -1,6 +1,8 @@
 // Klassenansicht (#/lehrkraft/klasse/<id>): Tabelle der Lernenden (Nr., Nachname, Vorname, Code,
 // Verfügbarkeit der Eltern), Codes erzeugen, Elternbriefe als PDF („Elternschreiben für diese Klasse
 // erstellen“), Rückmeldungen hochladen, „Gespräche terminieren“ und „Klasse löschen“.
+// Mit digitalem Briefkasten (MAILBOX_URL) wird er beim Erstellen der Elternbriefe angelegt; der QR-Code
+// enthält dann Briefkasten-ID und öffentlichen Schlüssel, und Rückmeldungen kommen automatisch an.
 //
 // Eingaben werden sofort (verzögert um SAVE_DELAY bzw. beim Verlassen des Feldes) gespeichert,
 // ohne die Tabelle neu aufzubauen – der Fokus bleibt also beim Tippen erhalten.
@@ -14,6 +16,8 @@ import { cleanName, hasCodeLetters, studentCode, studentNameCode, transliterate 
 import { WEEKDAYS_SHORT, parseIsoDate, formatRanges, formatRange, formatTimestamp, toMinutes, fromMinutes } from '../core/time.js';
 import { savePdf, preloadPdf } from '../core/pdf.js';
 import { createResponseImporter } from '../components/response-import.js';
+import { mailboxEnabled, MailboxError } from '../core/mailbox.js';
+import { ensureTeacherMailbox, hasTeacherMailbox, publishClassDirectory } from '../core/teacher-mailbox.js';
 
 const SAVE_DELAY = 300;
 const MAX_NAME = 80;
@@ -249,16 +253,13 @@ export default function render(ctx) {
     h(
       'p',
       { class: 'muted' },
-      'Die Eltern schicken Ihnen ihre Rückmeldung als PDF-Datei per E-Mail. Laden Sie die Dateien hier hoch – gerne viele auf einmal. Die Zeiten erscheinen danach in der Spalte „Verfügbarkeit der Eltern“.',
+      mailboxEnabled()
+        ? 'Rückmeldungen kommen automatisch über den digitalen Briefkasten; Rückmeldungen per E-Mail können Sie weiterhin hier hochladen. Die Zeiten erscheinen in der Spalte „Verfügbarkeit der Eltern“.'
+        : 'Die Eltern schicken Ihnen ihre Rückmeldung als PDF-Datei per E-Mail. Laden Sie die Dateien hier hoch – gerne viele auf einmal. Die Zeiten erscheinen danach in der Spalte „Verfügbarkeit der Eltern“.',
     ),
     importHost,
   );
-  try {
-    importHost.appendChild(createResponseImporter({ classId, onImported }));
-  } catch (err) {
-    console.warn(err);
-    importHost.appendChild(alertBox('warning', 'Der Upload der Rückmeldungen ist im Moment nicht verfügbar. Bitte laden Sie die Seite später neu.'));
-  }
+  renderImporter();
 
   mount(root, h('div', { class: 'tc-page' }, h('a', { class: 'back-link', href: '#/lehrkraft/klassen' }, 'Alle Klassen'), header, studentsCard, respCard));
   renderTable();
@@ -389,6 +390,16 @@ export default function render(ctx) {
   }
 
   // ---------- Anzeige außerhalb der Tabelle ----------
+
+  /** Upload-Bereich (neu) einsetzen – z. B. nachdem der digitale Briefkasten eingerichtet wurde. */
+  function renderImporter() {
+    try {
+      mount(importHost, createResponseImporter({ classId, onImported }));
+    } catch (err) {
+      console.warn(err);
+      mount(importHost, alertBox('warning', 'Der Upload der Rückmeldungen ist im Moment nicht verfügbar. Bitte laden Sie die Seite später neu.'));
+    }
+  }
 
   function updateUi() {
     const named = rows.filter(keepRow);
@@ -815,14 +826,57 @@ export default function render(ctx) {
     mount(primaryBtn, h('span', { class: 'spinner', 'aria-hidden': 'true' }), 'PDF wird erstellt …');
     showFeedback(null);
     try {
+      // Digitaler Briefkasten: vor den Briefen anlegen, damit der QR-Code Briefkasten-ID und Schlüssel enthält.
+      // Klappt das nicht (z. B. Speicher voll), entstehen die Briefe wie bisher für den Weg per E-Mail.
+      const hadMailbox = hasTeacherMailbox();
+      let mailboxFailed = false;
+      if (mailboxEnabled() && !hadMailbox) {
+        try {
+          await ensureTeacherMailbox();
+        } catch (err) {
+          console.warn(err);
+          mailboxFailed = true;
+        }
+        // Upload-Bereich zeigt jetzt den Briefkasten (auch falls die PDF danach scheitert)
+        if (hasTeacherMailbox()) renderImporter();
+      }
+      const current = getCurrentState();
       const { createParentLettersPdf } = await import('../pdf/letters-pdf.js');
-      const result = await createParentLettersPdf(getCurrentState(), classId);
+      const result = await createParentLettersPdf(current, classId);
       const name = savePdf(result.doc, result.filename || `Elternbriefe Klasse ${classId}.pdf`);
       const pages = result.pageCount || rows.filter(keepRow).length;
-      showFeedback(
-        alertBox('success', h('strong', {}, 'Die Elternbriefe wurden erstellt. '), `Die Datei „${name}“ hat ${plural(pages, 'Seite', 'Seiten')} – eine pro Kind. Drucken Sie sie aus und geben Sie jedem Kind seinen Brief mit.`),
-        'success',
-      );
+      const text = `Die Datei „${name}“ hat ${plural(pages, 'Seite', 'Seiten')} – eine pro Kind. Drucken Sie sie aus und geben Sie jedem Kind seinen Brief mit.`;
+      const withMailbox = hasTeacherMailbox(current);
+      if (!withMailbox && !mailboxFailed) {
+        showFeedback(alertBox('success', h('strong', {}, 'Die Elternbriefe wurden erstellt. '), text), 'success');
+      } else {
+        const success = alertBox(
+          'success',
+          h('p', {}, h('strong', {}, 'Die Elternbriefe wurden erstellt. '), text),
+          h(
+            'p',
+            { class: 'small', 'data-testid': 'letters-mailbox-note' },
+            withMailbox
+              ? 'Die Eltern senden ihre Rückmeldung über den digitalen Briefkasten. ParentsDay übernimmt sie automatisch, wenn Sie Ihre Klassen öffnen – sofort geht es mit „Neue Rückmeldungen abrufen“.'
+              : 'Der digitale Briefkasten konnte nicht eingerichtet werden. Die Eltern schicken ihre Rückmeldung deshalb per E-Mail.',
+            // Der Schlüssel zum Briefkasten liegt nur in diesem Browser (und im Zwischenspeicher).
+            withMailbox && !hadMailbox
+              ? ' Tipp: Speichern Sie jetzt einen Zwischenstand. Nur damit können Sie die Rückmeldungen auch auf einem anderen Gerät oder nach dem Löschen der Browserdaten lesen.'
+              : null,
+          ),
+        );
+        showFeedback(success, 'success');
+        // Verzeichniseintrag für Eltern mit Termin-Schlüssel (ohne QR-Code)
+        if (withMailbox) {
+          publishClassDirectory(getCurrentState() || current, classId).catch((err) => {
+            if (!feedback.contains(success)) return;
+            const note = h('p', { class: 'small', 'data-testid': 'letters-directory-note' }, directoryNote(err));
+            // Eintrag gehört einem anderen Briefkasten: eigene Warnung statt Randnotiz
+            if (err instanceof MailboxError && err.status === 409) feedback.appendChild(alertBox('warning', note));
+            else success.appendChild(note);
+          });
+        }
+      }
     } catch (err) {
       console.warn(err);
       showFeedback(alertBox('error', h('strong', {}, 'Die Elternbriefe konnten nicht erstellt werden. '), friendlyError(err)), 'error');
@@ -834,19 +888,33 @@ export default function render(ctx) {
     }
   }
 
+  /** Hinweis, wenn der Verzeichniseintrag für den Termin-Schlüssel nicht abgelegt werden konnte. */
+  function directoryNote(err) {
+    // Ein anderer (früherer) Briefkasten dieser Lehrkraft hat den Eintrag schon – z. B. vor dem Löschen der Browserdaten.
+    if (err instanceof MailboxError && err.status === 409) {
+      return [
+        h('strong', {}, 'Achtung: '),
+        'Für den Termin-Schlüssel dieser Klasse ist schon ein anderer digitaler Briefkasten eingetragen – meist ein früherer von Ihnen (z. B. von vor dem Löschen der Browserdaten). Rückmeldungen von Eltern, die den Termin-Schlüssel abtippen statt den QR-Code zu scannen, kommen deshalb nicht hier an. Haben Sie noch den Zwischenstand, mit dem Sie die ersten Elternbriefe erstellt haben, laden Sie ihn und erstellen Sie die Elternbriefe danach neu.',
+      ];
+    }
+    if (err instanceof MailboxError && !err.offline) {
+      return `Hinweis: Eltern ohne QR-Code (mit Termin-Schlüssel) schicken ihre Rückmeldung vorerst per E-Mail. ${err.message}`;
+    }
+    return 'Hinweis: Der digitale Briefkasten war gerade nicht erreichbar. Eltern ohne QR-Code (mit Termin-Schlüssel) schicken ihre Rückmeldung deshalb vorerst per E-Mail. Beim nächsten Abrufen der Rückmeldungen wird es erneut versucht.';
+  }
+
   // ---------- Rückmeldungen und Klasse löschen ----------
 
+  // Rückmeldungen können auch ankommen, während die Lehrkraft tippt (automatischer Abruf aus dem
+  // digitalen Briefkasten): Eingaben, noch leere Zeilen und der Fokus im Namensfeld bleiben erhalten.
   function onImported() {
     flushSave();
     const fresh = getCurrentState();
     const cls = fresh && findClass(fresh, classId);
     if (!cls) return;
     state = fresh;
-    rows = rowsFromClass(cls);
-    dirty.clear();
-    removed.clear();
     loadedIds = new Set(cls.students.map((st) => st.id));
-    renderTable();
+    adoptStudents(cls.students);
     updateUi();
   }
 

@@ -1,15 +1,19 @@
 // Elternsprechtag erstellen (mode 'create') und „Weitere Einstellungen“ (mode 'settings'):
 // Tage im Kalender wählen, Anfangs- und Endzeit je Tag, Adresse der Schule, Terminlänge und
 // E-Mail-Adresse für Rückmeldungen. In den Einstellungen zusätzlich: Hinweis auf bereits erstellte
-// Elternbriefe, Profil (nur lesen) und „Alle Daten in diesem Browser löschen“.
+// Elternbriefe, digitaler Briefkasten (nur wenn MAILBOX_URL gesetzt ist), Profil (nur lesen) und
+// „Alle Daten in diesem Browser löschen“.
 
 import { MAX_EVENT_DAYS as MAX_DAYS, SLOT_MIN, SLOT_MAX, ADDRESS_MAX_CHARS, ADDRESS_MAX_LINES } from '../config.js';
 import { h, mount, toast, confirmDialog, alertBox, plural, friendlyError } from '../core/ui.js';
 import { updateState, getCurrentState, deleteTeacherState, clearSession, loadEventDraft, storeEventDraft, clearEventDraft, setDraftPending } from '../core/storage.js';
-import { toMinutes, fromMinutes, slotStarts, formatDate, formatDateWithWeekday, todayIso } from '../core/time.js';
+import { toMinutes, fromMinutes, slotStarts, formatDate, formatDateWithWeekday, formatTimestamp, nowParts, todayIso } from '../core/time.js';
 import { createCalendarPicker } from '../components/calendar-picker.js';
 import { saveBackupNow, openLoadBackupDialog, isEmptyDevice, markEmptyDevice } from '../components/backup-actions.js';
 import { isValidEmail } from '../core/codes.js';
+import { mailboxEnabled, checkMailboxService } from '../core/mailbox.js';
+import { hasTeacherMailbox, fetchMailboxResponses, clearTeacherMailbox } from '../core/teacher-mailbox.js';
+import { UP_TO_DATE_REASONS } from '../core/responses.js';
 
 // Höchstens MAX_DAYS Tage: Grenze des Termin-Schlüssels (siehe core/transport.js).
 // Die Adresse steht im Link/QR-Code des Elternbriefs – längere Texte machen den QR-Code unlesbar.
@@ -149,6 +153,25 @@ function ignoreRepeat(e) {
 
 function classList(ids) {
   return ids.length === 1 ? `die Klasse ${ids[0]}` : `die Klassen ${ids.slice(0, -1).join(', ')} und ${ids[ids.length - 1]}`;
+}
+
+// Gründe aus applyResponses() (core/responses.js), bei denen nichts verloren geht: Die Zeiten stehen schon in ParentsDay.
+const ALREADY_THERE = new Set(UP_TO_DATE_REASONS);
+
+/** Abgerufene Rückmeldungen, die zu keinem Kind in ParentsDay passen (z. B. Klasse nicht angelegt). */
+function unmatchedResponses(fetched) {
+  return (fetched?.skipped || []).filter((s) => !ALREADY_THERE.has(s.reason));
+}
+
+/** Kurze Liste „Name (Klasse 5a) – Grund“, höchstens 6 Einträge. */
+function responseList(items) {
+  const shown = items.slice(0, 6);
+  return h(
+    'ul',
+    { class: 'evt-affected' },
+    shown.map((r) => h('li', {}, `${r.name}${r.classId ? ` (Klasse ${r.classId})` : ''}${r.reason ? ` – ${r.reason}` : ''}`)),
+    items.length > shown.length ? h('li', {}, `… und ${items.length - shown.length} weitere`) : null,
+  );
 }
 
 // ---------- View ----------
@@ -292,7 +315,16 @@ export default function render(ctx) {
             ? 'Standardlänge eines Termins. Gilt für die Zeitauswahl der Eltern und für neue Termine. Bereits geplante Termine behalten ihre Dauer.'
             : 'Standardlänge eines Termins, z. B. 10 Minuten. Kann später unter „Weitere Einstellungen“ geändert werden.',
         ),
-        formField('email', 'evt-email', 'E-Mail-Adresse für Rückmeldungen der Eltern', emailInput, 'Steht im Elternbrief. An diese Adresse schicken die Eltern ihre Rückmeldung.'),
+        formField(
+          'email',
+          'evt-email',
+          'E-Mail-Adresse für Rückmeldungen der Eltern',
+          emailInput,
+          // Mit Briefkasten ist die E-Mail nur noch die Notlösung.
+          mailboxEnabled()
+            ? 'Steht im Elternbrief. Ist der digitale Briefkasten nicht erreichbar, schicken die Eltern ihre Rückmeldung an diese Adresse.'
+            : 'Steht im Elternbrief. An diese Adresse schicken die Eltern ihre Rückmeldung.',
+        ),
       ),
     ),
     h(
@@ -633,11 +665,21 @@ export default function render(ctx) {
     }
   }
 
-  async function onDeleteAll() {
+  async function onDeleteAll(e) {
+    if (ignoreRepeat(e) || deleteAllBtn.getAttribute('aria-disabled') === 'true') return;
+    // Digitaler Briefkasten: wird vorher geleert (best effort), damit keine Kopien auf dem Server bleiben.
+    const withMailbox = hasTeacherMailbox(getCurrentState() || saved);
     const content = h(
       'div',
       { class: 'stack-small' },
       h('p', {}, 'Ihr Elternsprechtag, alle Klassen, Lernenden, Rückmeldungen und Termine werden endgültig aus diesem Browser gelöscht. Das lässt sich nicht rückgängig machen.'),
+      withMailbox
+        ? h(
+            'p',
+            { 'data-testid': 'delete-all-mailbox-note' },
+            'Auch Ihr digitaler Briefkasten wird geleert: Rückmeldungen, die dort noch liegen, werden vom Server gelöscht. Sind neue darunter, fragt ParentsDay vorher noch einmal nach.',
+          )
+        : null,
       alertBox('warning', h('strong', {}, 'Wichtig: '), 'Speichern Sie vorher einen Zwischenstand, wenn Sie die Daten später noch brauchen. Mit dieser Datei können Sie alles wiederherstellen.'),
       h(
         'div',
@@ -658,12 +700,270 @@ export default function render(ctx) {
     );
     const ok = await confirmDialog({ title: 'Alle Daten in diesem Browser löschen?', message: content, confirmText: 'Endgültig löschen', cancelText: 'Abbrechen', danger: true });
     if (!ok) return;
+    let mailboxLeft = false;
+    if (withMailbox) {
+      setBusy(deleteAllBtn, true, 'Wird gelöscht …');
+      mailboxBusy(true);
+      let proceed = true;
+      let fetched = null;
+      try {
+        // Zuerst abrufen: Neue Rückmeldungen stehen in keinem früher gespeicherten Zwischenstand und
+        // gingen sonst unbemerkt verloren. Scheitert der Abruf, bleibt der Briefkasten unverändert.
+        fetched = await fetchMailboxResponses();
+        showFetched();
+        if (fetched.applied.length || unmatchedResponses(fetched).length) proceed = await confirmNewBeforeDelete(fetched);
+        // Nur löschen, was abgeholt wurde – was inzwischen eingegangen ist, bleibt (lesbar mit dem Zwischenstand).
+        if (proceed) await clearTeacherMailbox({ upTo: fetched.newest });
+      } catch (err) {
+        // Abruf oder Leeren gescheitert (meist nicht erreichbar): trotzdem löschen – im Briefkasten liegen nur
+        // verschlüsselte Kopien, die sich mit dem Zwischenstand später noch abrufen bzw. leeren lassen.
+        console.warn(err);
+        mailboxLeft = true;
+      }
+      if (!proceed) {
+        setBusy(deleteAllBtn, false);
+        mailboxBusy(false);
+        toast(fetched?.applied.length ? 'Es wurde nichts gelöscht. Die neuen Rückmeldungen wurden in ParentsDay übernommen.' : 'Es wurde nichts gelöscht.', 'info');
+        return;
+      }
+    }
     clearEventDraft(saved);
     setDraftPending(false);
     deleteTeacherState(saved.teacher.teacherCode);
     clearSession();
     toast('Ihre Daten wurden aus diesem Browser gelöscht.', 'success');
+    if (mailboxLeft) {
+      toast(
+        'Der digitale Briefkasten war nicht erreichbar und konnte nicht geleert werden. Die Rückmeldungen darin bleiben verschlüsselt – lesen kann sie nur, wer Ihren Schlüssel hat. Mit Ihrem Zwischenstand können Sie den Briefkasten später noch leeren.',
+        'warning',
+        12000,
+      );
+    }
     navigate('/');
+  }
+
+  /** Rückfrage, wenn beim Löschen aller Daten eben noch neue Rückmeldungen abgerufen wurden. */
+  function confirmNewBeforeDelete(fetched) {
+    const unmatched = unmatchedResponses(fetched);
+    const n = fetched.applied.length + unmatched.length;
+    return confirmDialog({
+      title: 'Neue Rückmeldungen eingegangen',
+      message: h(
+        'div',
+        { class: 'stack-small', 'data-testid': 'delete-all-new-responses' },
+        h('p', {}, `Im digitalen Briefkasten ${n === 1 ? 'lag noch 1 neue Rückmeldung' : `lagen noch ${n} neue Rückmeldungen`}. Beim Löschen ${n === 1 ? 'geht sie' : 'gehen sie'} verloren:`),
+        responseList([...fetched.applied.map((a) => ({ name: a.name, classId: a.classId })), ...unmatched]),
+        fetched.applied.length
+          ? [
+              h(
+                'p',
+                {},
+                `Wenn Sie die Daten noch brauchen, speichern Sie jetzt einen Zwischenstand. Er enthält ${fetched.applied.length === 1 ? 'die neue Rückmeldung' : 'die neuen Rückmeldungen'}.`,
+                unmatched.length ? ' Rückmeldungen, die zu keinem Kind in diesem Browser passen, enthält er nicht.' : null,
+              ),
+              h('div', {}, h('button', { type: 'button', class: 'btn btn-secondary', onclick: (e) => ignoreRepeat(e) || saveBackupNow() }, 'Zwischenstand jetzt speichern')),
+            ]
+          : h('p', {}, n === 1 ? 'Diese Rückmeldung passt zu keinem Kind in diesem Browser. Brechen Sie ab, wenn Sie sie noch brauchen.' : 'Diese Rückmeldungen passen zu keinem Kind in diesem Browser. Brechen Sie ab, wenn Sie sie noch brauchen.'),
+      ),
+      confirmText: 'Endgültig löschen',
+      cancelText: 'Abbrechen',
+      danger: true,
+    });
+  }
+
+  // --- Digitaler Briefkasten (nur mit MAILBOX_URL) ---
+
+  /** Zeigt am Knopf, dass gerade etwas läuft. Nicht „disabled“, damit der Tastaturfokus bleibt. */
+  function setBusy(btn, on, busyText) {
+    if (on) {
+      if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+      btn.setAttribute('aria-disabled', 'true');
+      btn.classList.add('evt-busy');
+      mount(btn, h('span', { class: 'spinner evt-spinner', 'aria-hidden': 'true' }), busyText);
+    } else {
+      btn.removeAttribute('aria-disabled');
+      btn.classList.remove('evt-busy');
+      if (btn.dataset.label) mount(btn, btn.dataset.label);
+    }
+  }
+
+  let mailboxRunning = false;
+  const mailboxStatus = h('div', { class: 'evt-mailbox-status', 'data-testid': 'mailbox-status', 'aria-live': 'polite' });
+  const checkBtn = h('button', { type: 'button', class: 'btn btn-secondary', 'data-testid': 'mailbox-check', onclick: onCheckMailbox }, 'Verbindung prüfen');
+  const clearBtn = h('button', { type: 'button', class: 'btn btn-secondary', 'data-testid': 'mailbox-clear', onclick: onClearMailbox }, 'Briefkasten leeren');
+  const fetchedValue = h('dd', { 'data-testid': 'mailbox-fetched' });
+
+  /** Sperrt die Briefkasten-Knöpfe, solange eine Anfrage läuft. */
+  function mailboxBusy(on) {
+    mailboxRunning = on;
+    for (const btn of [checkBtn, clearBtn]) {
+      if (on) btn.setAttribute('aria-disabled', 'true');
+      else btn.removeAttribute('aria-disabled');
+    }
+  }
+
+  function showMailboxStatus(node) {
+    mount(mailboxStatus, node);
+  }
+
+  function showFetched() {
+    fetchedValue.textContent = formatTimestamp(getCurrentState()?.mailbox?.lastFetchedAt || '') || 'noch nie';
+  }
+
+  async function onCheckMailbox(e) {
+    if (ignoreRepeat(e) || mailboxRunning) return;
+    mailboxBusy(true);
+    setBusy(checkBtn, true, 'Wird geprüft …');
+    showMailboxStatus(null);
+    try {
+      const ok = await checkMailboxService();
+      if (!ok) throw new Error('Der digitale Briefkasten antwortet nicht wie erwartet.');
+      showMailboxStatus(
+        alertBox('success', h('strong', {}, 'Verbindung in Ordnung. '), `Der digitale Briefkasten ist erreichbar (geprüft um ${nowParts().time} Uhr).`),
+      );
+    } catch (err) {
+      console.warn(err);
+      showMailboxStatus(
+        alertBox(
+          'error',
+          h('p', {}, h('strong', {}, 'Verbindung fehlgeschlagen. '), friendlyError(err, 'Der digitale Briefkasten ist gerade nicht erreichbar.')),
+          h(
+            'p',
+            {},
+            'Bereits eingegangene Rückmeldungen bleiben im Briefkasten erhalten. Solange er nicht erreichbar ist, können Eltern ihre Rückmeldung per E-Mail schicken. Besteht das Problem weiter, wenden Sie sich an die Person, die ParentsDay an Ihrer Schule betreut.',
+          ),
+        ),
+      );
+    } finally {
+      setBusy(checkBtn, false);
+      mailboxBusy(false);
+    }
+  }
+
+  async function onClearMailbox(e) {
+    if (ignoreRepeat(e) || mailboxRunning) return;
+    const ok = await confirmDialog({
+      title: 'Briefkasten leeren?',
+      message: h(
+        'div',
+        { class: 'stack-small' },
+        h('p', {}, 'Alle Rückmeldungen im digitalen Briefkasten werden vom Server gelöscht. Neue Rückmeldungen, die noch nicht abgeholt wurden, übernimmt ParentsDay vorher.'),
+        h('p', {}, 'Zeiten, die bereits in ParentsDay übernommen wurden, bleiben erhalten. Eltern können auch danach noch Rückmeldungen schicken.'),
+        h('p', { class: 'muted' }, 'Empfohlen nach dem Elternsprechtag.'),
+      ),
+      confirmText: 'Briefkasten leeren',
+      cancelText: 'Abbrechen',
+      danger: true,
+    });
+    if (!ok) return;
+    mailboxBusy(true);
+    setBusy(clearBtn, true, 'Wird geleert …');
+    showMailboxStatus(null);
+    let fetched = null;
+    // Hinweis, wie viele Rückmeldungen dabei übernommen wurden (auch wenn danach etwas scheitert)
+    const appliedNote = (before) => {
+      const n = fetched?.applied.length || 0;
+      if (!n) return null;
+      return h('p', {}, before ? `Vorher ${n === 1 ? 'wurde 1 neue Rückmeldung' : `wurden ${n} neue Rückmeldungen`} in ParentsDay übernommen.` : `${n === 1 ? '1 neue Rückmeldung wurde' : `${n} neue Rückmeldungen wurden`} in ParentsDay übernommen.`);
+    };
+    try {
+      // Zuerst abholen, damit keine neue Rückmeldung verloren geht. Scheitert das (z. B. Speicher voll),
+      // wird nicht gelöscht.
+      fetched = await fetchMailboxResponses();
+      showFetched();
+      // Rückmeldungen, die zu keinem Kind passen, stehen nicht in ParentsDay – vor dem Löschen nachfragen.
+      const unmatched = unmatchedResponses(fetched);
+      if (unmatched.length && !(await confirmClearUnmatched(unmatched))) {
+        showMailboxStatus(alertBox('info', h('p', {}, h('strong', {}, 'Der Briefkasten wurde nicht geleert. '), 'Die Rückmeldungen bleiben darin.'), appliedNote(false)));
+        return;
+      }
+      // Nur löschen, was abgeholt wurde: Rückmeldungen, die während der Rückfrage eingehen, bleiben im Briefkasten.
+      const deleted = await clearTeacherMailbox({ upTo: fetched.newest });
+      showMailboxStatus(
+        alertBox(
+          'success',
+          h('p', {}, h('strong', {}, 'Der Briefkasten wurde geleert. '), deleted ? `${plural(deleted, 'Rückmeldung wurde', 'Rückmeldungen wurden')} vom Server gelöscht.` : 'Es lagen keine Rückmeldungen darin.'),
+          appliedNote(true),
+        ),
+      );
+    } catch (err) {
+      console.warn(err);
+      showMailboxStatus(
+        alertBox('error', h('p', {}, h('strong', {}, 'Der Briefkasten konnte nicht geleert werden. '), friendlyError(err, 'Bitte versuchen Sie es später noch einmal.')), appliedNote(false)),
+      );
+    } finally {
+      setBusy(clearBtn, false);
+      mailboxBusy(false);
+    }
+  }
+
+  /** Rückfrage vor dem Leeren, wenn Rückmeldungen im Briefkasten zu keinem Kind in ParentsDay passen. */
+  function confirmClearUnmatched(unmatched) {
+    const n = unmatched.length;
+    return confirmDialog({
+      title: 'Nicht zugeordnete Rückmeldungen löschen?',
+      message: h(
+        'div',
+        { class: 'stack-small', 'data-testid': 'mailbox-unmatched' },
+        h('p', {}, `${n === 1 ? '1 Rückmeldung im Briefkasten passt' : `${n} Rückmeldungen im Briefkasten passen`} zu keinem Kind in ParentsDay, zum Beispiel weil die Klasse in diesem Browser nicht angelegt ist:`),
+        responseList(unmatched),
+        h(
+          'p',
+          {},
+          `Wenn Sie den Briefkasten jetzt leeren, ${n === 1 ? 'geht sie' : 'gehen sie'} verloren. Legen Sie vorher die Klasse bzw. das Kind an oder laden Sie Ihren aktuellen Zwischenstand – dann ${n === 1 ? 'wird sie' : 'werden sie'} beim nächsten Abruf übernommen.`,
+        ),
+      ),
+      confirmText: 'Trotzdem leeren',
+      cancelText: 'Abbrechen',
+      danger: true,
+    });
+  }
+
+  /** Karte „Digitaler Briefkasten“. Ohne eingerichteten Dienst gibt es sie nicht. */
+  function mailboxCard() {
+    if (!mailboxEnabled()) return null;
+    const mb = hasTeacherMailbox(saved) ? saved.mailbox : null;
+    const head = h(
+      'div',
+      { class: 'evt-mailbox-head' },
+      h('h2', { id: 'evt-mailbox-title' }, 'Digitaler Briefkasten'),
+      mb ? h('span', { class: 'badge badge-success' }, 'Aktiv') : h('span', { class: 'badge' }, 'Noch nicht eingerichtet'),
+    );
+    if (!mb) {
+      return h(
+        'section',
+        { class: 'card evt-mailbox', 'aria-labelledby': 'evt-mailbox-title', 'data-testid': 'mailbox-card' },
+        head,
+        h('p', { 'data-testid': 'mailbox-pending' }, 'Wird automatisch eingerichtet, wenn Sie Elternbriefe erstellen.'),
+        h('p', { class: 'muted small' }, 'Danach schicken die Eltern ihre Rückmeldung mit einem Klick auf „Absenden“ direkt an Sie – Ende-zu-Ende-verschlüsselt, nur Sie können sie lesen. Der Weg per E-Mail bleibt als Notlösung erhalten.'),
+        // Briefe von früher enthalten noch keinen Briefkasten (QR-Code ohne Briefkasten-Angaben).
+        lettersClasses.length
+          ? h('p', {}, `Die Elternbriefe für ${classList(lettersClasses)} enthalten noch keinen Briefkasten. Erstellen Sie sie neu, wenn die Eltern ihn nutzen sollen – sonst schicken sie ihre Rückmeldung wie bisher per E-Mail.`)
+          : null,
+      );
+    }
+    const since = mb.createdAt && !Number.isNaN(Date.parse(mb.createdAt)) ? nowParts(new Date(mb.createdAt)).date : '';
+    showFetched();
+    return h(
+      'section',
+      { class: 'card evt-mailbox', 'aria-labelledby': 'evt-mailbox-title', 'data-testid': 'mailbox-card' },
+      head,
+      h('p', {}, 'Eltern schicken ihre Rückmeldung mit „Absenden“ direkt an Sie. Die Zeiten erscheinen automatisch in der Tabelle der Klasse.'),
+      h(
+        'dl',
+        { class: 'evt-profile evt-mailbox-facts' },
+        since ? h('div', { class: 'evt-profile-row' }, h('dt', {}, 'Aktiv seit'), h('dd', { 'data-testid': 'mailbox-since' }, since)) : null,
+        h('div', { class: 'evt-profile-row' }, h('dt', {}, 'Zuletzt abgerufen'), fetchedValue),
+      ),
+      alertBox(
+        'info',
+        h('p', {}, h('strong', {}, 'Ende-zu-Ende-verschlüsselt: '), 'Nur Sie können die Rückmeldungen lesen. Der Schlüssel dazu steckt in Ihrem Browser und in Ihrem Zwischenspeicher – ohne ihn sind die Rückmeldungen nicht lesbar.'),
+        h('p', {}, 'Speichern Sie deshalb einen Zwischenstand, bevor Sie die Browserdaten löschen oder das Gerät wechseln.'),
+      ),
+      h('div', { class: 'evt-mailbox-actions' }, checkBtn, clearBtn),
+      h('p', { class: 'muted small' }, '„Briefkasten leeren“ löscht nur die Kopien auf dem Server. Übernommene Zeiten bleiben in ParentsDay. Empfohlen nach dem Elternsprechtag.'),
+      mailboxStatus,
+    );
   }
 
   // --- Seite zusammensetzen ---
@@ -684,6 +984,7 @@ export default function render(ctx) {
       : null;
   const t = saved.teacher;
   const profileRow = (label, value) => h('div', { class: 'evt-profile-row' }, h('dt', {}, label), h('dd', {}, value));
+  const deleteAllBtn = h('button', { type: 'button', class: 'btn btn-danger', onclick: onDeleteAll }, 'Alle Daten in diesem Browser löschen');
 
   mount(
     root,
@@ -720,6 +1021,7 @@ export default function render(ctx) {
           )
         : null,
       form,
+      isSettings ? mailboxCard() : null,
       isSettings
         ? h(
             'div',
@@ -744,7 +1046,7 @@ export default function render(ctx) {
               h('h2', { id: 'evt-danger-title' }, 'Gefahrenbereich'),
               h('p', {}, 'Entfernt Ihren Elternsprechtag, alle Klassen, Lernenden, Rückmeldungen und Termine aus diesem Browser. Anschließend werden Sie abgemeldet.'),
               h('p', { class: 'muted small' }, 'Tipp: Speichern Sie vorher einen Zwischenstand, damit Sie Ihre Daten bei Bedarf wiederherstellen können.'),
-              h('button', { type: 'button', class: 'btn btn-danger', onclick: onDeleteAll }, 'Alle Daten in diesem Browser löschen'),
+              deleteAllBtn,
             ),
           )
         : null,

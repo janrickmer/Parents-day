@@ -12,3 +12,7 @@ binding = "DB"
 database_name = "parentsday"
 # Nach `npx wrangler d1 create parentsday` die ausgegebene ID hier eintragen:
 database_id = "HIER-DIE-DATENBANK-ID-EINTRAGEN"
+
+# Täglich aufräumen: Rückmeldungen und Verzeichniseinträge, die älter als 200 Tage sind, löschen (03:17 UTC).
+[triggers]
+crons = ["17 3 * * *"]

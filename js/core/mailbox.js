@@ -196,7 +196,8 @@ export async function sendToMailbox(ref, payload) {
 
 /**
  * Lehrkraft: holt alle Rückmeldungen ab und entschlüsselt sie.
- * @returns {Promise<{payloads: object[], unreadable: number, total: number}>}
+ * `newest`: Eingangszeitpunkt (ms) der neuesten abgeholten Nachricht, 0 ohne Nachrichten (für clearMailbox).
+ * @returns {Promise<{payloads: object[], unreadable: number, total: number, newest: number}>}
  */
 export async function fetchFromMailbox(teacherMailbox) {
   if (!isValidTeacherMailbox(teacherMailbox)) throw new MailboxError('Es ist noch kein digitaler Briefkasten eingerichtet.');
@@ -204,20 +205,28 @@ export async function fetchFromMailbox(teacherMailbox) {
   const messages = Array.isArray(data?.messages) ? data.messages : [];
   const payloads = [];
   let unreadable = 0;
+  let newest = 0;
   for (const msg of messages) {
+    const at = Number(msg?.createdAt);
+    if (Number.isFinite(at) && at > newest) newest = at;
     try {
       payloads.push(await decryptForTeacher(teacherMailbox.privateKey, msg));
     } catch {
       unreadable++;
     }
   }
-  return { payloads, unreadable, total: messages.length };
+  return { payloads, unreadable, total: messages.length, newest };
 }
 
-/** Lehrkraft: löscht alle Rückmeldungen im Briefkasten. */
-export async function clearMailbox(teacherMailbox) {
+/**
+ * Lehrkraft: löscht die Rückmeldungen im Briefkasten.
+ * @param {{upTo?: number}} [options] – nur Nachrichten bis zu diesem Eingangszeitpunkt (ms, `newest` aus
+ *   fetchFromMailbox); was danach eingegangen ist, bleibt liegen. Ohne Angabe wird alles gelöscht.
+ */
+export async function clearMailbox(teacherMailbox, { upTo } = {}) {
   if (!isValidTeacherMailbox(teacherMailbox)) throw new MailboxError('Es ist noch kein digitaler Briefkasten eingerichtet.');
-  const data = await request('DELETE', `/v1/boxes/${teacherMailbox.id}/messages`, { secret: teacherMailbox.secret });
+  const limit = Number.isInteger(upTo) && upTo >= 0 ? `?before=${upTo + 1}` : '';
+  const data = await request('DELETE', `/v1/boxes/${teacherMailbox.id}/messages${limit}`, { secret: teacherMailbox.secret });
   return Number(data?.deleted) || 0;
 }
 
@@ -265,9 +274,11 @@ export async function lookupDirectoryEntry(ref) {
   try {
     data = await request('GET', `/v1/directory/${id}`);
   } catch (err) {
+    // 404: ältere Fassung des Dienstes ohne Eintrag
     if (err instanceof MailboxError && err.status === 404) return null;
     throw err;
   }
+  if (!data || data.found === false) return null;
   try {
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(data.iv) }, key, b64ToBytes(data.ct));
     return JSON.parse(dec.decode(plain));

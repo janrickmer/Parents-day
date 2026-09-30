@@ -7,14 +7,17 @@
 // Einrichtung: siehe docs/BRIEFKASTEN.md. Benötigt wird die D1-Bindung `DB`.
 // Optionale Variablen: ALLOWED_ORIGINS – erlaubte Web-Adressen, kommagetrennt
 // (Standard: https://parentsday.janrickmer.de); POSTS_PER_MINUTE – Rückmeldungen je IP und Minute (Standard 30).
+// Aufräumen: Ein täglicher Cron-Trigger (scheduled) löscht Rückmeldungen und Verzeichniseinträge, bevor sie
+// 200 Tage alt sind. Ältere gibt der Dienst auch ohne Cron-Trigger nicht mehr heraus.
 //
 // Schnittstelle (alle Antworten JSON):
 //   GET    /v1/health                         → { ok: true }
 //   POST   /v1/boxes/<boxId>/messages          Rückmeldung einwerfen: { v:1, epk, iv, ct } → 201 { id }
 //   GET    /v1/boxes/<boxId>/messages          Rückmeldungen abholen (Authorization: Bearer <secret>)
 //   DELETE /v1/boxes/<boxId>/messages          Briefkasten leeren   (Authorization: Bearer <secret>)
+//          ?before=<Zeitpunkt in ms>           nur Rückmeldungen, die davor eingegangen sind (→ { deleted })
 //   PUT    /v1/directory/<dirId>               Eintrag für den Termin-Schlüssel ablegen (Bearer <secret>)
-//   GET    /v1/directory/<dirId>               Eintrag lesen → { iv, ct }
+//   GET    /v1/directory/<dirId>               Eintrag lesen → { iv, ct }, ohne Eintrag { found: false }
 // boxId = die ersten 32 Zeichen von base64url(SHA-256(secret)). Nur wer das Geheimnis kennt
 // (die Lehrkraft), kann den Briefkasten lesen oder leeren.
 
@@ -25,7 +28,8 @@ const B64_RE = /^[A-Za-z0-9_-]+$/;
 const MAX_MESSAGE_BYTES = 16 * 1024;
 const MAX_DIRECTORY_BYTES = 4 * 1024;
 const MAX_MESSAGES_PER_BOX = 3000;
-const RETENTION_MS = 200 * 24 * 60 * 60 * 1000; // Rückmeldungen werden nach 200 Tagen gelöscht
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RETENTION_MS = 200 * DAY_MS; // Rückmeldungen und Verzeichniseinträge gelten 200 Tage
 const POSTS_PER_MINUTE = 30; // je IP-Adresse und Worker-Instanz
 
 const schemaReady = new WeakMap(); // je Datenbank-Bindung nur einmal Tabellen anlegen
@@ -37,7 +41,9 @@ function ensureSchema(db) {
       .batch([
         db.prepare('CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, box_id TEXT NOT NULL, created_at INTEGER NOT NULL, body TEXT NOT NULL)'),
         db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_box ON messages (box_id, created_at)'),
+        db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_created ON messages (created_at)'),
         db.prepare('CREATE TABLE IF NOT EXISTS directory (dir_id TEXT PRIMARY KEY, box_id TEXT NOT NULL, updated_at INTEGER NOT NULL, body TEXT NOT NULL)'),
+        db.prepare('CREATE INDEX IF NOT EXISTS idx_directory_updated ON directory (updated_at)'),
       ])
       .catch((err) => {
         schemaReady.delete(db);
@@ -132,16 +138,29 @@ async function postMessage(request, env, db, boxId) {
     .prepare('INSERT INTO messages (id, box_id, created_at, body) VALUES (?, ?, ?, ?)')
     .bind(id, boxId, now, JSON.stringify({ v: 1, epk: body.epk, iv: body.iv, ct: body.ct }))
     .run();
-  // Gelegentlich alte Rückmeldungen löschen
-  if (Math.random() < 0.02) await db.prepare('DELETE FROM messages WHERE created_at < ?').bind(now - RETENTION_MS).run();
+  // Gelegentlich aufräumen – für den Fall, dass kein Cron-Trigger eingerichtet ist
+  if (Math.random() < 0.02) await removeExpired(db, now);
   return json(request, env, 201, { id, createdAt: now });
+}
+
+/**
+ * Löscht Rückmeldungen und Verzeichniseinträge, die bald 200 Tage alt sind. Der Cron-Trigger läuft einmal
+ * am Tag – mit einem Tag Vorlauf liegt so nichts länger als 200 Tage in der Datenbank.
+ */
+async function removeExpired(db, now = Date.now()) {
+  const limit = now - (RETENTION_MS - DAY_MS);
+  const [messages, directory] = await db.batch([
+    db.prepare('DELETE FROM messages WHERE created_at < ?').bind(limit),
+    db.prepare('DELETE FROM directory WHERE updated_at < ?').bind(limit),
+  ]);
+  return { messages: Number(messages?.meta?.changes ?? 0), directory: Number(directory?.meta?.changes ?? 0) };
 }
 
 async function listMessages(request, env, db, boxId) {
   if (!(await authorized(request, boxId))) return json(request, env, 403, { error: 'forbidden' });
   const { results } = await db
-    .prepare('SELECT id, created_at, body FROM messages WHERE box_id = ? ORDER BY created_at LIMIT ?')
-    .bind(boxId, MAX_MESSAGES_PER_BOX)
+    .prepare('SELECT id, created_at, body FROM messages WHERE box_id = ? AND created_at >= ? ORDER BY created_at LIMIT ?')
+    .bind(boxId, Date.now() - RETENTION_MS, MAX_MESSAGES_PER_BOX)
     .all();
   const messages = (results || []).map((row) => ({ id: row.id, createdAt: Number(row.created_at), ...JSON.parse(row.body) }));
   return json(request, env, 200, { messages });
@@ -149,7 +168,13 @@ async function listMessages(request, env, db, boxId) {
 
 async function clearMessages(request, env, db, boxId) {
   if (!(await authorized(request, boxId))) return json(request, env, 403, { error: 'forbidden' });
-  const result = await db.prepare('DELETE FROM messages WHERE box_id = ?').bind(boxId).run();
+  // ?before=<ms>: nur, was die Lehrkraft schon abgeholt hat – Rückmeldungen, die inzwischen eingegangen sind, bleiben.
+  const before = new URL(request.url).searchParams.get('before');
+  if (before !== null && !/^\d{1,15}$/.test(before)) return json(request, env, 400, { error: 'invalid-before' });
+  const result =
+    before === null
+      ? await db.prepare('DELETE FROM messages WHERE box_id = ?').bind(boxId).run()
+      : await db.prepare('DELETE FROM messages WHERE box_id = ? AND created_at < ?').bind(boxId, Number(before)).run();
   return json(request, env, 200, { deleted: Number(result?.meta?.changes ?? 0) });
 }
 
@@ -159,19 +184,21 @@ async function putDirectory(request, env, db, dirId) {
     return json(request, env, 400, { error: 'invalid-entry' });
   }
   if (!(await authorized(request, body.box))) return json(request, env, 403, { error: 'forbidden' });
-  const existing = await db.prepare('SELECT box_id FROM directory WHERE dir_id = ?').bind(dirId).first();
-  // Ein Eintrag gehört dem Briefkasten, der ihn zuerst angelegt hat.
-  if (existing && existing.box_id !== body.box) return json(request, env, 409, { error: 'taken' });
+  const existing = await db.prepare('SELECT box_id, updated_at FROM directory WHERE dir_id = ?').bind(dirId).first();
+  // Ein Eintrag gehört dem Briefkasten, der ihn zuerst angelegt hat – bis er 200 Tage nicht mehr aktualisiert wurde.
+  if (existing && existing.box_id !== body.box && Number(existing.updated_at) >= Date.now() - RETENTION_MS) return json(request, env, 409, { error: 'taken' });
   await db
-    .prepare('INSERT INTO directory (dir_id, box_id, updated_at, body) VALUES (?, ?, ?, ?) ON CONFLICT(dir_id) DO UPDATE SET updated_at = excluded.updated_at, body = excluded.body')
+    .prepare('INSERT INTO directory (dir_id, box_id, updated_at, body) VALUES (?, ?, ?, ?) ON CONFLICT(dir_id) DO UPDATE SET box_id = excluded.box_id, updated_at = excluded.updated_at, body = excluded.body')
     .bind(dirId, body.box, Date.now(), JSON.stringify({ iv: body.iv, ct: body.ct }))
     .run();
   return json(request, env, existing ? 200 : 201, { ok: true });
 }
 
 async function getDirectory(request, env, db, dirId) {
-  const row = await db.prepare('SELECT body FROM directory WHERE dir_id = ?').bind(dirId).first();
-  if (!row) return json(request, env, 404, { error: 'not-found' });
+  const row = await db.prepare('SELECT body FROM directory WHERE dir_id = ? AND updated_at >= ?').bind(dirId, Date.now() - RETENTION_MS).first();
+  // Kein Eintrag ist bei Eltern mit Termin-Schlüssel normal (z. B. Brief ohne Briefkasten) – daher kein 404,
+  // das der Browser als Fehler in der Konsole meldet.
+  if (!row) return json(request, env, 200, { found: false });
   return json(request, env, 200, JSON.parse(row.body));
 }
 
@@ -202,5 +229,13 @@ export default {
       console.error(err);
       return json(request, env, 500, { error: 'server-error' });
     }
+  },
+
+  // Täglicher Cron-Trigger (siehe docs/BRIEFKASTEN.md bzw. worker/wrangler.toml)
+  async scheduled(event, env) {
+    if (!env.DB) return;
+    await ensureSchema(env.DB);
+    const removed = await removeExpired(env.DB);
+    console.log(`Aufgeräumt: ${removed.messages} Rückmeldungen, ${removed.directory} Verzeichniseinträge`);
   },
 };

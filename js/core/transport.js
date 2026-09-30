@@ -2,7 +2,8 @@
 //  1. Lehrkraft → Eltern: Elternsprechtag-Daten stecken im Link/QR-Code des Elternbriefs
 //     (…/#/eltern?e=<base64url-JSON>) und zusätzlich in einem kurzen, abtippbaren „Termin-Schlüssel“.
 //  2. Eltern → Lehrkraft: Rückmeldung als PDF mit eingebetteten Daten (siehe pdf.js) und
-//     zusätzlich als Textblock „PARENTSDAY[…]“ im E-Mail-Text.
+//     zusätzlich als Textblock „PARENTSDAY[…]“ im E-Mail-Text. Mit digitalem Briefkasten geht dieselbe
+//     Rückmeldung verschlüsselt an den Briefkasten-Dienst (core/mailbox.js); PDF/E-Mail bleibt die Notlösung.
 
 import { PUBLIC_URL } from '../config.js';
 import { toMinutes, fromMinutes, cleanAvailability } from './time.js';

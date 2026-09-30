@@ -7,6 +7,10 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
+    <!-- Digitaler Briefkasten: Wird MAILBOX_URL in js/config.js gesetzt, gehört dieselbe Adresse (z. B.
+         https://parentsday-briefkasten.name.workers.dev) oben zu „connect-src“. Sonst blockiert der Browser jede
+         Verbindung, und alle Eltern landen bei der Notlösung per E-Mail. Siehe docs/BRIEFKASTEN.md, Schritt 8;
+         `npm test` prüft das. -->
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ParentsDay – Elternsprechtag</title>
     <meta name="description" content="ParentsDay – Termine für den Elternsprechtag einfach zwischen Lehrkräften und Eltern abstimmen." />

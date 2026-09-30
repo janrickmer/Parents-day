@@ -95,6 +95,15 @@ function updateInert() {
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
 
 /**
+ * Zweiter (dritter …) Klick eines Doppelklicks. Wer einen Knopf doppelt anklickt, der einen Dialog öffnet,
+ * trifft mit dem zweiten Klick sonst den Hintergrund (Dialog schließt sofort) oder einen Knopf im Dialog –
+ * im schlimmsten Fall „Löschen“, ohne die Rückfrage gelesen zu haben. Der erste Klick zählt immer.
+ */
+function isRepeatClick(e) {
+  return e.detail > 1;
+}
+
+/**
  * Modaler Dialog. Der Tastaturfokus bleibt im Dialog; Esc schließt nur den obersten Dialog.
  * @param {{title:string, content: Node|string|Array, actions?: Array<{label:string, variant?:string, onClick?:(close:Function)=>void, value?:any}>, onClose?:Function, wide?:boolean}} opts
  * @returns {{close: (value?:any)=>void, result: Promise<any>, element: HTMLElement}}
@@ -152,12 +161,24 @@ export function modal({ title, content, actions = [], onClose, wide = false }) {
           'div',
           { class: 'modal-actions' },
           actions.map((a) =>
-            h('button', { type: 'button', class: `btn btn-${a.variant || 'secondary'}`, onclick: () => (a.onClick ? a.onClick(close) : close(a.value)) }, a.label),
+            h(
+              'button',
+              {
+                type: 'button',
+                class: `btn btn-${a.variant || 'secondary'}`,
+                onclick: (e) => {
+                  if (isRepeatClick(e)) return;
+                  if (a.onClick) a.onClick(close);
+                  else close(a.value);
+                },
+              },
+              a.label,
+            ),
           ),
         )
       : null,
   );
-  const backdrop = h('div', { class: 'modal-backdrop', onclick: (e) => e.target === backdrop && close(undefined) }, dialog);
+  const backdrop = h('div', { class: 'modal-backdrop', onclick: (e) => e.target === backdrop && !isRepeatClick(e) && close(undefined) }, dialog);
   entry.backdrop = backdrop;
   document.body.appendChild(backdrop);
   openDialogs.push(entry);
@@ -293,6 +314,8 @@ export function field(label, control, { hint = '', id } = {}) {
 
 const NETWORK_RE = /failed to fetch|dynamically imported module|importing a module script failed|error loading dynamically|networkerror|network request failed|load failed|internetverbindung/i;
 const TECHNICAL_RE = /\b(cannot|undefined|null|is not|not a function|unexpected|failed|invalid|error|exception|of undefined)\b/i;
+// Namen technischer Fehler wie „DataError“, „OperationError“ oder „TypeError: …“ (DOMException ohne Meldung)
+const TECHNICAL_NAME_RE = /[a-z](Error|Exception)\b/;
 
 /** Ist ein Fehler durch eine fehlende Internetverbindung entstanden (fetch, dynamischer Import)? */
 export function isNetworkError(err) {
@@ -308,6 +331,6 @@ export function friendlyError(err, fallback = 'Ein unerwarteter Fehler ist aufge
   const msg = err?.message || String(err || '');
   if (/internetverbindung/i.test(msg)) return msg;
   if (isNetworkError(err)) return 'Keine Verbindung zum Internet. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.';
-  if (!msg || (TECHNICAL_RE.test(msg) && !/[äöüßÄÖÜ„“]/.test(msg))) return fallback;
+  if (!msg || ((TECHNICAL_RE.test(msg) || TECHNICAL_NAME_RE.test(msg)) && !/[äöüßÄÖÜ„“]/.test(msg))) return fallback;
   return msg;
 }

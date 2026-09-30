@@ -2,6 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTeacherMailbox, encryptForTeacher, decryptForTeacher, boxIdFromSecret, isValidTeacherMailbox, isValidMailboxRef, bytesToB64 } from '../../js/core/mailbox.js';
 import { startMailboxServer } from '../e2e/mailbox-server.mjs';
+import worker from '../../worker/briefkasten.js';
 import { eventLink, decodeEventParam } from '../../js/core/transport.js';
 import { normalizeTeacherState } from '../../js/core/storage.js';
 
@@ -81,7 +82,10 @@ test('Verzeichnis: gehört dem ersten Briefkasten', async () => {
   assert.equal((await call('PUT', `/v1/directory/${dirId}`, { body: entry, secret: mb.secret })).status, 200);
   assert.equal((await call('PUT', `/v1/directory/${dirId}`, { body: { ...entry, box: other.id }, secret: other.secret })).status, 409);
   assert.deepEqual(await (await call('GET', `/v1/directory/${dirId}`)).json(), { iv: entry.iv, ct: entry.ct });
-  assert.equal((await call('GET', `/v1/directory/${other.id}`)).status, 404);
+  // Kein Eintrag: 200 statt 404, damit der Browser der Eltern keinen Fehler in der Konsole meldet
+  const missing = await call('GET', `/v1/directory/${other.id}`);
+  assert.equal(missing.status, 200);
+  assert.deepEqual(await missing.json(), { found: false });
 });
 
 test('Elternbrief-Link enthält Briefkasten-ID und öffentlichen Schlüssel, nie das Geheimnis', async () => {
@@ -103,4 +107,56 @@ test('Elternbrief-Link enthält Briefkasten-ID und öffentlichen Schlüssel, nie
   assert.equal(plain.mailbox, undefined);
   // Kaputter Briefkasten im gespeicherten Stand wird verworfen
   assert.equal(normalizeTeacherState({ ...state, mailbox: { ...mb, privateKey: 'x' } }).mailbox, null);
+});
+
+const DAY = 24 * 60 * 60 * 1000;
+
+test('Dienst: Briefkasten leeren mit ?before löscht nur, was schon abgeholt wurde', async () => {
+  const mb = await createTeacherMailbox();
+  for (let i = 0; i < 2; i++) assert.equal((await call('POST', `/v1/boxes/${mb.id}/messages`, { body: await encryptForTeacher(mb.publicKey, payload) })).status, 201);
+  // Beide sind vor einer Minute eingegangen; die Lehrkraft holt sie ab
+  srv.db.db.prepare('UPDATE messages SET created_at = ? WHERE box_id = ?').run(Date.now() - 60000, mb.id);
+  const fetched = (await (await call('GET', `/v1/boxes/${mb.id}/messages`, { secret: mb.secret })).json()).messages;
+  assert.equal(fetched.length, 2);
+  const newest = Math.max(...fetched.map((m) => m.createdAt));
+  // Während der Rückfrage „Briefkasten leeren?“ kommt eine weitere Rückmeldung an
+  await call('POST', `/v1/boxes/${mb.id}/messages`, { body: await encryptForTeacher(mb.publicKey, payload) });
+  assert.equal((await call('DELETE', `/v1/boxes/${mb.id}/messages?before=abc`, { secret: mb.secret })).status, 400);
+  const del = await (await call('DELETE', `/v1/boxes/${mb.id}/messages?before=${newest + 1}`, { secret: mb.secret })).json();
+  assert.equal(del.deleted, 2);
+  const left = (await (await call('GET', `/v1/boxes/${mb.id}/messages`, { secret: mb.secret })).json()).messages;
+  assert.equal(left.length, 1, 'die später eingegangene Rückmeldung bleibt');
+  assert.deepEqual(await decryptForTeacher(mb.privateKey, left[0]), payload);
+  // Ohne ?before wird alles gelöscht (wie bisher)
+  assert.equal((await (await call('DELETE', `/v1/boxes/${mb.id}/messages`, { secret: mb.secret })).json()).deleted, 1);
+});
+
+test('Dienst: nach 200 Tagen gelöscht – nicht mehr abrufbar, Cron-Aufräumen, Verzeichnis wird frei', async () => {
+  const mb = await createTeacherMailbox();
+  const other = await createTeacherMailbox();
+  for (let i = 0; i < 2; i++) await call('POST', `/v1/boxes/${mb.id}/messages`, { body: await encryptForTeacher(mb.publicKey, payload) });
+  const entry = { box: mb.id, iv: 'AAAAAAAAAAAAAAAA', ct: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBB' };
+  const dirId = other.id;
+  assert.equal((await call('PUT', `/v1/directory/${dirId}`, { body: entry, secret: mb.secret })).status, 201);
+  // Eine Nachricht und der Verzeichniseintrag sind 201 Tage alt
+  const old = Date.now() - 201 * DAY;
+  srv.db.db.prepare('UPDATE messages SET created_at = ? WHERE id = (SELECT id FROM messages WHERE box_id = ? ORDER BY created_at LIMIT 1)').run(old, mb.id);
+  srv.db.db.prepare('UPDATE directory SET updated_at = ? WHERE dir_id = ?').run(old, dirId);
+  const listed = (await (await call('GET', `/v1/boxes/${mb.id}/messages`, { secret: mb.secret })).json()).messages;
+  assert.equal(listed.length, 1, 'alte Rückmeldung wird nicht mehr herausgegeben');
+  assert.deepEqual(await (await call('GET', `/v1/directory/${dirId}`)).json(), { found: false }, 'alter Eintrag gilt nicht mehr');
+
+  // Täglicher Cron-Trigger löscht beides aus der Datenbank
+  await worker.scheduled({ cron: '17 3 * * *', scheduledTime: Date.now() }, srv.env, { waitUntil() {} });
+  const count = (sql, ...args) => Number(srv.db.db.prepare(sql).get(...args).n);
+  assert.equal(count('SELECT COUNT(*) AS n FROM messages WHERE box_id = ?', mb.id), 1);
+  assert.equal(count('SELECT COUNT(*) AS n FROM directory WHERE dir_id = ?', dirId), 0);
+
+  // Ein veralteter Eintrag blockiert einen neuen Briefkasten nicht mehr (sonst 409)
+  assert.equal((await call('PUT', `/v1/directory/${dirId}`, { body: entry, secret: mb.secret })).status, 201);
+  srv.db.db.prepare('UPDATE directory SET updated_at = ? WHERE dir_id = ?').run(old, dirId);
+  assert.equal((await call('PUT', `/v1/directory/${dirId}`, { body: { ...entry, box: other.id }, secret: other.secret })).status, 200);
+  assert.equal(srv.db.db.prepare('SELECT box_id FROM directory WHERE dir_id = ?').get(dirId).box_id, other.id);
+  // Ein aktueller Eintrag gehört weiter seinem Briefkasten
+  assert.equal((await call('PUT', `/v1/directory/${dirId}`, { body: entry, secret: mb.secret })).status, 409);
 });

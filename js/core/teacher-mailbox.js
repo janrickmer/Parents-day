@@ -43,25 +43,36 @@ export async function publishClassDirectory(state, classId) {
 /**
  * Holt alle Rückmeldungen aus dem Briefkasten und übernimmt sie in den Zustand (wie beim Hochladen).
  * Wirft bei Verbindungsproblemen (MailboxError).
+ * `newest`: Eingangszeitpunkt der neuesten abgeholten Nachricht – für clearTeacherMailbox({ upTo }).
  * @param {{classId?: string}} [options] – Klasse, in der gerade abgerufen wird (nur für den Bericht)
- * @returns {Promise<{applied: object[], skipped: object[], unreadable: number, total: number, state: object}>}
+ * @returns {Promise<{applied: object[], skipped: object[], unreadable: number, total: number, newest: number, state: object}>}
  */
 export async function fetchMailboxResponses({ classId } = {}) {
   const current = getCurrentState();
-  if (!hasTeacherMailbox(current)) return { applied: [], skipped: [], unreadable: 0, total: 0, state: current };
-  const { payloads, unreadable, total } = await fetchFromMailbox(current.mailbox);
+  if (!hasTeacherMailbox(current)) return { applied: [], skipped: [], unreadable: 0, total: 0, newest: 0, state: current };
+  const { payloads, unreadable, total, newest } = await fetchFromMailbox(current.mailbox);
+  // Während des Abrufs abgemeldet, andere Lehrkraft angemeldet oder anderer Briefkasten (Zwischenstand geladen)?
+  // Dann gehören die Rückmeldungen nicht zum jetzigen Stand – nichts übernehmen, nichts vermerken.
+  const latest = getCurrentState();
+  if (!latest || latest.teacher.teacherCode !== current.teacher.teacherCode || latest.mailbox?.id !== current.mailbox.id) {
+    return { applied: [], skipped: [], unreadable: 0, total: 0, newest: 0, state: latest };
+  }
   const valid = payloads.map(validateResponsePayload).filter(Boolean);
   let report = { applied: [], skipped: [] };
   const state = updateState((s) => {
     report = applyResponses(s, valid, { classId });
     if (s.mailbox) s.mailbox.lastFetchedAt = new Date().toISOString();
   });
-  return { ...report, unreadable: unreadable + (payloads.length - valid.length), total, state };
+  return { ...report, unreadable: unreadable + (payloads.length - valid.length), total, newest, state };
 }
 
-/** Löscht alle Rückmeldungen im Briefkasten (übernommene Zeiten bleiben in ParentsDay erhalten). */
-export async function clearTeacherMailbox() {
+/**
+ * Löscht die Rückmeldungen im Briefkasten (übernommene Zeiten bleiben in ParentsDay erhalten).
+ * @param {{upTo?: number}} [options] – nur bis zu diesem Eingangszeitpunkt (`newest` aus fetchMailboxResponses):
+ *   Rückmeldungen, die nach dem Abruf eingegangen sind, bleiben dann im Briefkasten.
+ */
+export async function clearTeacherMailbox({ upTo } = {}) {
   const current = getCurrentState();
   if (!hasTeacherMailbox(current)) return 0;
-  return clearMailbox(current.mailbox);
+  return clearMailbox(current.mailbox, { upTo });
 }

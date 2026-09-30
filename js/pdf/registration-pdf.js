@@ -5,6 +5,7 @@ import { PUBLIC_URL, APP_NAME } from '../config.js';
 import { createPdf, drawBrandHeader, writeParagraph, drawInfoBox, drawFooters, embedPayload, setText, lineHeight, PAGE, CONTENT_WIDTH, COLORS } from '../core/pdf.js';
 import { registrationCode, teacherCode } from '../core/codes.js';
 import { formatDate, nowParts } from '../core/time.js';
+import { mailboxEnabled } from '../core/mailbox.js';
 
 /** Dateiname der Registrierungs-PDF, z. B. „ParentsDay Registrierung Anna Meier.pdf“. */
 export function registrationFilename(teacher) {
@@ -162,7 +163,9 @@ export async function createRegistrationPdf(teacher) {
   y = writeParagraph(doc, 'Gut zu wissen', y, { size: 14, bold: true, color: COLORS.primary, spacingAfter: 2.5 });
   y = writeParagraph(
     doc,
-    `${APP_NAME} speichert Ihre Daten nur in dem Browser, mit dem Sie arbeiten – nicht auf einem Server. Möchten Sie an einem anderen Gerät weiterarbeiten, speichern Sie über „Zwischenstand speichern“ eine Datei und laden Sie diese dort nach der Anmeldung über „Zwischenstand laden“.`,
+    mailboxEnabled()
+      ? `${APP_NAME} speichert Ihre Daten in dem Browser, mit dem Sie arbeiten. Beim digitalen Briefkasten liegen nur die Rückmeldungen der Eltern und die Angaben aus Ihren Elternbriefen – verschlüsselt. Möchten Sie an einem anderen Gerät weiterarbeiten, speichern Sie über „Zwischenstand speichern“ eine Datei und laden Sie diese dort nach der Anmeldung über „Zwischenstand laden“. Speichern Sie einen Zwischenstand auch gleich nach Ihren ersten Elternbriefen: Nur mit ihm lassen sich die Rückmeldungen im Briefkasten später noch lesen, etwa auf einem neuen Gerät.`
+      : `${APP_NAME} speichert Ihre Daten nur in dem Browser, mit dem Sie arbeiten – nicht auf einem Server. Möchten Sie an einem anderen Gerät weiterarbeiten, speichern Sie über „Zwischenstand speichern“ eine Datei und laden Sie diese dort nach der Anmeldung über „Zwischenstand laden“.`,
     y,
     { spacingAfter: 4 },
   );

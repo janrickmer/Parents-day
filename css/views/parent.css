@@ -416,3 +416,90 @@
 .parent-done-links {
   justify-content: space-between;
 }
+
+/* ---------- Digitaler Briefkasten: Senden fehlgeschlagen ---------- */
+
+.parent-submit-error:empty {
+  display: none;
+}
+/* Nach einem Fehler stehen „Erneut versuchen“ und „Stattdessen per E-Mail senden“ an Stelle von „Absenden“ */
+.parent-submit[hidden] {
+  display: none;
+}
+.parent-submit-error .alert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.parent-submit-error .alert p {
+  margin: 0;
+}
+.parent-send-error-title {
+  font-size: 1.05rem;
+}
+.parent-send-actions {
+  margin-top: 4px;
+}
+
+/* ---------- Digitaler Briefkasten: angekommen ---------- */
+
+.parent-sent-hero {
+  text-align: center;
+  padding: 20px 16px 22px;
+  border-radius: var(--radius);
+  background: var(--c-success-soft);
+  border: 1px solid #b5e0c5;
+  border-top: 6px solid var(--c-success);
+}
+.parent-sent-hero h1 {
+  margin: 0 0 6px;
+}
+.parent-sent-check {
+  display: inline-grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  background: var(--c-success);
+  color: #fff;
+  font-size: 1.9rem;
+  font-weight: 800;
+}
+.parent-sent-lead {
+  margin: 0 auto;
+  max-width: 540px;
+  font-size: 1.15rem;
+  line-height: 1.45;
+}
+/* „Sie müssen nichts weiter tun.“ in eigener Zeile */
+.parent-sent-lead strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--c-success-text);
+}
+.parent-sent .parent-done-summary h2,
+.parent-sent-change h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.parent-sent .parent-done-summary p,
+.parent-sent-change p {
+  margin: 0;
+}
+.parent-sent .parent-done-times {
+  margin: 2px 0;
+}
+@media (min-width: 600px) {
+  .parent-sent-hero {
+    padding: 28px 24px 30px;
+  }
+  .parent-sent-check {
+    width: 64px;
+    height: 64px;
+    font-size: 2.1rem;
+  }
+  .parent-sent-lead {
+    font-size: 1.25rem;
+  }
+}

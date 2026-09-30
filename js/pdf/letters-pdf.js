@@ -1,12 +1,15 @@
 // Elternbriefe einer Klasse: eine DIN-A4-Seite pro Kind mit Code. Jeder Brief enthält den gelben
 // Kasten mit den Zugangsdaten, einen QR-Code mit den Termindaten (eventLink) und den abtippbaren
 // Termin-Schlüssel. Passt ein Brief nicht auf eine Seite, wird er automatisch kompakter gesetzt.
+// Hat die Lehrkraft einen digitalen Briefkasten, enthält der QR-Code auch dessen ID und öffentlichen
+// Schlüssel, und Schritt 4 lautet „Absenden – fertig!“ (E-Mail nur noch als Notlösung).
 
 import { PUBLIC_URL, APP_NAME } from '../config.js';
 import { createPdf, drawBrandHeader, writeParagraph, drawInfoBox, drawQrCode, drawFooters, embedPayload, setText, lineHeight, PAGE, CONTENT_WIDTH, COLORS } from '../core/pdf.js';
 import { eventLink, encodeEventKey } from '../core/transport.js';
 import { formatDate, formatDateLong, formatDateWithWeekday, formatRange, nowParts, parseIsoDate, WEEKDAYS_SHORT } from '../core/time.js';
 import { findClass } from '../core/storage.js';
+import { mailboxEnabled, publicMailboxRef } from '../core/mailbox.js';
 
 /** Unterkante für den Briefinhalt (darunter steht die Fußzeile). */
 const BOTTOM = PAGE.height - 19;
@@ -244,9 +247,9 @@ function daysPanel(doc, draw, y, ctx, mode) {
 }
 
 /** Nummerierter Schritt mit hängendem Einzug; eine Adresse im Text wird anklickbar. */
-function step(doc, draw, number, text, y, mode, { width = CONTENT_WIDTH, url = '' } = {}) {
+function step(doc, draw, number, text, y, mode, { width = CONTENT_WIDTH, url = '', spacingAfter = 1 + 1.5 * mode.gap } = {}) {
   const maxWidth = width - STEP_INDENT;
-  const opts = { x: PAGE.margin + STEP_INDENT, maxWidth, size: mode.size, spacingAfter: 1 + 1.5 * mode.gap };
+  const opts = { x: PAGE.margin + STEP_INDENT, maxWidth, size: mode.size, spacingAfter };
   if (draw) {
     setText(doc, { size: mode.size, bold: true, color: COLORS.primary });
     doc.text(`${number}.`, PAGE.margin + 1, y + lineHeight(doc, mode.size) * 0.75);
@@ -281,7 +284,19 @@ async function stepsGroup(doc, draw, y, ctx, mode) {
   left = step(doc, draw, 2, 'Melden Sie sich mit Vorname, Nachname und Code Ihres Kindes aus dem gelben Kasten an.', left, mode, { width });
   left = step(doc, draw, 3, 'Markieren Sie alle Zeitslots grün, zu denen Sie Zeit hätten – auch mehrere getrennte Zeiträume sind möglich.', left, mode, { width });
   const mailTo = ctx.teacherEmail ? `an ${ctx.teacherEmail}` : 'an mich';
-  left = step(doc, draw, 4, `Klicken Sie auf „Absenden“ und schicken Sie die erzeugte PDF-Datei per E-Mail ${mailTo}.`, left, mode, { width });
+  if (ctx.mailbox) {
+    // Digitaler Briefkasten: kein Mailen nötig; der Weg per E-Mail steht nur noch klein darunter.
+    left = step(doc, draw, 4, 'Klicken Sie auf „Absenden“ – fertig! Ihre Angaben werden verschlüsselt an mich übermittelt.', left, mode, { width, spacingAfter: 0.6 });
+    left = paragraph(doc, draw, `Sollte das nicht klappen, zeigt Ihnen die Seite, wie Sie die Rückmeldung per E-Mail ${mailTo} senden.`, left, {
+      x: PAGE.margin + STEP_INDENT,
+      maxWidth: width - STEP_INDENT,
+      size: mode.small,
+      color: COLORS.muted,
+      spacingAfter: 1 + 1.5 * mode.gap,
+    });
+  } else {
+    left = step(doc, draw, 4, `Klicken Sie auf „Absenden“ und schicken Sie die erzeugte PDF-Datei per E-Mail ${mailTo}.`, left, mode, { width });
+  }
 
   const qrX = PAGE.margin + CONTENT_WIDTH - qrSize;
   const qrY = y + 1;
@@ -397,7 +412,9 @@ export async function createParentLettersPdf(state, classId) {
   if (days.length === 0) throw new Error('Bitte legen Sie zuerst den Elternsprechtag mit Tagen und Uhrzeiten an.');
 
   const t = state.teacher || {};
-  const link = eventLink(state, cls.id);
+  // Briefkasten nur, wenn der Dienst eingerichtet ist – sonst bleibt der Brief wie bisher.
+  const mailbox = mailboxEnabled() ? publicMailboxRef(state.mailbox) : null;
+  const link = eventLink(mailbox ? state : { ...state, mailbox: null }, cls.id);
   const ctx = {
     classId: cls.id,
     days,
@@ -405,6 +422,7 @@ export async function createParentLettersPdf(state, classId) {
     teacherName: `${t.firstName || ''} ${t.lastName || ''}`.trim(),
     teacherEmail: t.email || '',
     link,
+    mailbox: Boolean(mailbox),
     // Der Schlüssel passt nur zu Codes dieser Klasse und Lehrkraft (Prüfung bei der Anmeldung).
     eventKey: encodeEventKey(state.event, { teacherCode: t.teacherCode, classId: cls.id }),
     date: nowParts().date,

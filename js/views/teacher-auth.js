@@ -9,6 +9,7 @@ import { getSession, setSession, clearSession, loadTeacherState, createTeacherSt
 import { savePdf, extractPayloadFromFile, preloadPdf } from '../core/pdf.js';
 import { createRegistrationPdf } from '../pdf/registration-pdf.js';
 import { markEmptyDevice } from '../components/backup-actions.js';
+import { mailboxEnabled } from '../core/mailbox.js';
 
 const MIN_BIRTH_DATE = '1900-01-01';
 const NOT_REGISTRATION = 'Diese Datei ist keine ParentsDay-Registrierung.';
@@ -199,13 +200,18 @@ function sessionBanner(ctx) {
 }
 
 function privacyNote() {
+  // Mit digitalem Briefkasten liegen Rückmeldungen und Elternbrief-Angaben (verschlüsselt) auch beim Dienst.
+  const withMailbox = mailboxEnabled();
   return alertBox(
     'info',
     h(
       'p',
       {},
-      h('strong', {}, 'Ihre Daten werden nur in diesem Browser gespeichert.'),
-      ' ParentsDay hat keinen Server. Wenn Sie an einem anderen Gerät weiterarbeiten möchten, laden Sie nach der Anmeldung Ihren Zwischenstand über „Zwischenstand laden“. ',
+      h('strong', {}, withMailbox ? 'Ihre Daten werden in diesem Browser gespeichert.' : 'Ihre Daten werden nur in diesem Browser gespeichert.'),
+      withMailbox
+        ? ' Beim digitalen Briefkasten liegen nur die Rückmeldungen der Eltern und die Angaben aus Ihren Elternbriefen – verschlüsselt. '
+        : ' ParentsDay hat keinen Server. ',
+      'Wenn Sie an einem anderen Gerät weiterarbeiten möchten, laden Sie nach der Anmeldung Ihren Zwischenstand über „Zwischenstand laden“. ',
       h('a', { href: '#/datenschutz' }, 'Mehr zum Datenschutz'),
     ),
   );
@@ -280,7 +286,9 @@ function renderRegister(ctx) {
     lastName: formField('Nachname', nameInput('reg-lastname', 'family-name')),
     birthDate: formField('Geburtsdatum', birthDateInput('reg-birthdate'), { hint: 'Mit Jahr, z. B. 15.03.1990. Wird für Ihren Registrierungscode benötigt.' }),
     email: formField('E-Mail-Adresse', input('reg-email', { type: 'email', autocomplete: 'email', maxlength: 254, required: true, spellcheck: 'false' }), {
-      hint: 'An diese Adresse schicken Eltern ihre Rückmeldungen.',
+      hint: mailboxEnabled()
+        ? 'Steht in Ihren Elternbriefen – für Fragen der Eltern und als Notlösung, falls der digitale Briefkasten nicht erreichbar ist.'
+        : 'An diese Adresse schicken Eltern ihre Rückmeldungen.',
     }),
   };
   const status = h('div', { class: 'tauth-status', 'aria-live': 'polite' });

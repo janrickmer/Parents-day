@@ -532,3 +532,68 @@
   flex: 1 1 320px;
   margin: 0;
 }
+
+/* ---------- Einstellungen: digitaler Briefkasten ---------- */
+
+.evt-mailbox {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 4px solid var(--c-primary);
+}
+.evt-mailbox > p,
+.evt-mailbox .alert p {
+  margin: 0;
+}
+.evt-mailbox .alert {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.evt-mailbox-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.evt-mailbox-head h2 {
+  margin: 0;
+}
+.evt-mailbox-facts {
+  margin: 0;
+}
+.evt-mailbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.evt-mailbox-actions .btn {
+  white-space: normal;
+  text-align: center;
+}
+.evt-mailbox-status:empty {
+  display: none;
+}
+.evt-mailbox-status .alert {
+  display: block;
+}
+.evt-mailbox-status .alert p + p {
+  margin-top: 6px;
+}
+/* Knopf, an dem gerade etwas läuft: nicht verblasst, aber gesperrt */
+.evt-page .btn.evt-busy {
+  opacity: 1;
+  cursor: progress;
+}
+/* Auf hellen Knöpfen ist der weiße Ring des Standard-Spinners nicht sichtbar */
+.evt-page .btn-secondary .evt-spinner {
+  width: 16px;
+  height: 16px;
+  border-color: var(--c-border);
+  border-top-color: currentColor;
+}
+@media (max-width: 560px) {
+  .evt-mailbox-actions .btn {
+    width: 100%;
+  }
+}

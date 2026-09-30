@@ -1,11 +1,13 @@
 // Klassenübersicht (#/lehrkraft/klassen): Zusammenfassung des Elternsprechtags, neue Klasse anlegen
-// (Jahrgangsstufe 1–13, Buchstabe a–h), Klassen als Kacheln und gesammelter Upload der Rückmeldungen.
+// (Jahrgangsstufe 1–13, Buchstabe a–h), Klassen als Kacheln und gesammelter Upload der Rückmeldungen
+// (mit digitalem Briefkasten zusätzlich automatischer Abruf, siehe components/response-import.js).
 
 import { h, mount, alertBox, plural } from '../core/ui.js';
 import { updateState, getCurrentState, findClass } from '../core/storage.js';
 import { classId as makeClassId } from '../core/codes.js';
 import { WEEKDAYS_SHORT, parseIsoDate, formatDate, formatRange } from '../core/time.js';
 import { createResponseImporter } from '../components/response-import.js';
+import { mailboxEnabled } from '../core/mailbox.js';
 
 const GRADES = Array.from({ length: 13 }, (_, i) => i + 1);
 const LETTERS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
@@ -125,14 +127,17 @@ export default function render(ctx) {
 
   // --- Rückmeldungen hochladen ---
   const importHost = h('div', {});
+  const withMailbox = mailboxEnabled();
   const importCard = h(
     'section',
     { class: 'card tcl-import', 'aria-labelledby': 'tcl-import-title' },
-    h('h2', { id: 'tcl-import-title' }, 'Rückmeldungen der Eltern hochladen'),
+    h('h2', { id: 'tcl-import-title' }, withMailbox ? 'Rückmeldungen der Eltern' : 'Rückmeldungen der Eltern hochladen'),
     h(
       'p',
       { class: 'muted' },
-      'Laden Sie hier alle Rückmelde-PDFs der Eltern auf einmal hoch – egal aus welcher Klasse. ParentsDay erkennt am Code des Kindes automatisch, zu welcher Klasse eine Rückmeldung gehört.',
+      withMailbox
+        ? 'Rückmeldungen kommen automatisch über den digitalen Briefkasten; Rückmeldungen per E-Mail können Sie weiterhin hier hochladen – egal aus welcher Klasse. ParentsDay erkennt am Code des Kindes, zu welcher Klasse eine Rückmeldung gehört.'
+        : 'Laden Sie hier alle Rückmelde-PDFs der Eltern auf einmal hoch – egal aus welcher Klasse. ParentsDay erkennt am Code des Kindes automatisch, zu welcher Klasse eine Rückmeldung gehört.',
     ),
     importHost,
   );
@@ -190,10 +195,16 @@ export default function render(ctx) {
     renderTiles(id);
   }
 
-  /** Zustand neu lesen und Kacheln neu zeichnen (z. B. nach dem Upload von Rückmeldungen). */
+  /**
+   * Zustand neu lesen und Kacheln neu zeichnen (z. B. nach dem Upload von Rückmeldungen oder dem
+   * automatischen Abruf aus dem digitalen Briefkasten). Eine fokussierte Kachel behält den Fokus.
+   */
   function refresh() {
     state = getCurrentState() || state;
+    const focused = document.activeElement;
+    const focusId = focused && tilesHost.contains(focused) ? focused.dataset.testid : '';
     renderTiles();
+    if (focusId) tilesHost.querySelector(`[data-testid="${focusId}"]`)?.focus({ preventScroll: true });
   }
 
   function renderTiles(newId = '') {

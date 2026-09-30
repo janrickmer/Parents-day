@@ -1,14 +1,18 @@
-// Elternzugang: Anmeldung mit Vorname, Nachname und Code des Kindes, freie Zeitslots grün markieren,
-// „Absenden“ (Rückmelde-PDF herunterladen) und vorbereitete E-Mail an die Lehrkraft.
-// Die Termindaten kommen aus dem Link des Elternbriefs (#/eltern?e=…) oder aus dem Termin-Schlüssel.
-// Alles bleibt im Browser der Eltern (loadParentState/saveParentState), es gibt keinen Server.
+// Elternzugang: Anmeldung mit Vorname, Nachname und Code des Kindes, freie Zeitslots grün markieren und
+// „Absenden“. Mit digitalem Briefkasten (MAILBOX_URL gesetzt und Elternbrief mit Briefkasten) wird die
+// Rückmeldung verschlüsselt in den Briefkasten der Lehrkraft gelegt, den ihre Seite abholt. Sonst – und als
+// Notlösung, wenn der Briefkasten nicht erreichbar ist – wie bisher: Rückmelde-PDF herunterladen und E-Mail.
+// Die Termindaten kommen aus dem Link des Elternbriefs (#/eltern?e=…) oder aus dem Termin-Schlüssel
+// (mit Briefkasten zusätzlich aus dem Verzeichnis, das die Lehrkraft unter dem Schlüssel abgelegt hat).
+// Der Stand der Eltern bleibt im Browser (loadParentState/saveParentState).
 // Jeder Tab hat seinen eigenen Stand: Eltern, die die QR-Codes von Geschwistern in zwei Tabs öffnen,
 // schicken so jede Rückmeldung an die richtige Lehrkraft.
 
 import { MAX_EVENT_DAYS, SLOT_MIN, KEY_SLOT_MAX, ADDRESS_MAX_CHARS, ADDRESS_MAX_LINES, NAME_MAX_LENGTH } from '../config.js';
-import { h, mount, toast, field, alertBox, copyToClipboard, confirmDialog, friendlyError as friendlyText } from '../core/ui.js';
+import { h, mount, toast, field, alertBox, copyToClipboard, confirmDialog, isNetworkError, friendlyError as friendlyText } from '../core/ui.js';
 import { loadParentState, saveParentState, clearParentState } from '../core/storage.js';
-import { decodeEventParam, decodeEventKey, buildResponsePayload, encodeResponseText } from '../core/transport.js';
+import { decodeEventParam, decodeEventKey, encodeEventKey, eventInfoFromCompact, buildResponsePayload, encodeResponseText } from '../core/transport.js';
+import { mailboxEnabled, isValidMailboxRef, sendToMailbox, lookupDirectoryEntry, MailboxError } from '../core/mailbox.js';
 import { checkStudentLogin, cleanName, parseStudentCode, studentNameCode, isValidIsoDate, isValidEmail, codesEqual, teacherCodesMatch } from '../core/codes.js';
 import { slotStarts, slotsToRanges, formatRanges, formatDateLong, formatDateWithWeekday, formatRange, formatTimestamp, fromMinutes, toMinutes } from '../core/time.js';
 import { savePdf, preloadPdf } from '../core/pdf.js';
@@ -18,6 +22,8 @@ const TIME_RE = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/;
 const LINK_ERROR = 'Der Link aus dem Elternbrief ist unvollständig oder beschädigt.';
 // Ältere Mailprogramme (z. B. Outlook unter Windows) schneiden sehr lange mailto-Links ab.
 const MAILTO_MAX = 2000;
+// So lange wird bei der Anmeldung mit Termin-Schlüssel höchstens auf das Verzeichnis gewartet.
+const LOOKUP_TIMEOUT_MS = 8000;
 
 export default function render(ctx) {
   const step = ctx.params?.step;
@@ -72,15 +78,33 @@ function cleanEvent(ev) {
   const email = String(ev.teacherEmail || '').trim();
   const teacherCode = String(ev.teacherCode || '');
   const classId = String(ev.classId || '').toLowerCase();
+  const { mailbox, ...rest } = ev;
   return {
-    ...ev,
+    ...rest,
     teacherName: cleanName(ev.teacherName).slice(0, 2 * NAME_MAX_LENGTH + 1),
     // Nur echte Adressen: sonst könnte ein veränderter Link weitere Empfänger in die E-Mail schmuggeln.
     teacherEmail: isValidEmail(email) ? email : '',
     teacherCode: /^\p{L}\d{1,12}\p{L}$/u.test(teacherCode) ? teacherCode : '',
     schoolAddress: address,
     classId: /^(1[0-3]|[1-9])[a-h]$/.test(classId) ? classId : '',
+    // Digitaler Briefkasten nur mit gültiger ID und gültigem Schlüssel – sonst geht die Rückmeldung per E-Mail.
+    ...(isValidMailboxRef(mailbox) ? { mailbox: { id: String(mailbox.id), publicKey: String(mailbox.publicKey) } } : {}),
   };
+}
+
+/** Kann die Rückmeldung über den digitalen Briefkasten gehen? (Dienst eingerichtet, Elternbrief mit Briefkasten) */
+function canUseMailbox(event) {
+  return mailboxEnabled() && isValidMailboxRef(event?.mailbox);
+}
+
+/** Lehrkraft im Satz: „an Anna Meier“ bzw. „an die Lehrkraft“ … */
+function teacherAcc(event) {
+  return event?.teacherName || 'die Lehrkraft';
+}
+
+/** … und „bei Anna Meier“ bzw. „bei der Lehrkraft“. */
+function teacherDat(event) {
+  return event?.teacherName || 'der Lehrkraft';
 }
 
 /** Elternzustand laden; unbrauchbare (z. B. von Hand veränderte) Termindaten werden verworfen. */
@@ -126,6 +150,16 @@ function clearSubmission(ps) {
   delete ps.submittedAt;
   delete ps.lastPayload;
   delete ps.lastFilename;
+  delete ps.sentVia;
+  delete ps.sentAt;
+}
+
+/**
+ * Wurde die Rückmeldung in einen anderen Briefkasten geworfen, als ihn die neuen Termindaten nennen
+ * (z. B. neuer Elternbrief)? Dann muss sie erneut abgesendet werden – die markierten Zeiten bleiben.
+ */
+function mailboxChanged(ps, prev, next) {
+  return ps.sentVia === 'mailbox' && prev?.mailbox?.id !== next?.mailbox?.id;
 }
 
 function logout(ps) {
@@ -148,6 +182,39 @@ function adoptEvent(ps, event) {
   } else if (!prev || !sameSchedule(prev, event)) {
     ps.selection = {};
     clearSubmission(ps);
+  } else if (mailboxChanged(ps, prev, event)) {
+    clearSubmission(ps);
+  }
+}
+
+/**
+ * Termin-Schlüssel-Weg mit digitalem Briefkasten: holt die Daten des Elternbriefs (Lehrkraft, Schule,
+ * Briefkasten), die die Lehrkraft unter dem Schlüssel abgelegt hat. Übernommen werden sie nur, wenn
+ * Lehrkraft, Klasse, Tage, Uhrzeiten und Terminlänge genau zum Schlüssel passen.
+ * @returns {Promise<object|null>} Termindaten oder null (nicht gefunden, unpassend, keine Verbindung)
+ */
+async function findLetterData(keyEvent, owner) {
+  // Kanonischer Schlüssel: gleiche Schreibweise wie beim Ablegen, egal wie die Eltern ihn abgetippt haben.
+  const eventKey = encodeEventKey(keyEvent, owner);
+  if (!eventKey) return null;
+  let timer = 0;
+  try {
+    const raw = await Promise.race([
+      lookupDirectoryEntry({ teacherCode: owner.teacherCode, classId: owner.classId, eventKey }),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), LOOKUP_TIMEOUT_MS);
+      }),
+    ]);
+    if (!raw) return null;
+    const info = eventInfoFromCompact(raw, 'link');
+    if (!isValidEvent(info) || !sameSchedule(info, keyEvent)) return null;
+    const ev = cleanEvent(info);
+    if (!teacherCodesMatch(ev.teacherCode, owner.teacherCode) || ev.classId !== owner.classId) return null;
+    return ev;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -198,10 +265,45 @@ function setBusy(button, busy, busyLabel = '') {
   }
 }
 
+// Dauert das Senden länger als üblich, beruhigt ein Hinweis am Knopf. Spätestens nach 15 Sekunden
+// (Zeitgrenze in core/mailbox.js) erscheint sonst die Meldung mit dem Weg per E-Mail.
+const SLOW_MS = 5000;
+
+function slowNotice(button) {
+  const timer = setTimeout(() => {
+    if (button?.isConnected && button.getAttribute('aria-busy') === 'true') {
+      mount(button, h('span', { class: 'spinner', 'aria-hidden': 'true' }), 'Wird noch gesendet – bitte warten …');
+    }
+  }, SLOW_MS);
+  return () => clearTimeout(timer);
+}
+
 function friendlyError(err) {
   const msg = err?.message || String(err || '');
   if (/noch nicht implementiert/i.test(msg)) return 'Diese Funktion steht gerade noch nicht zur Verfügung. Bitte versuchen Sie es später noch einmal.';
   return friendlyText(err);
+}
+
+const EMAIL_ADVICE = 'Oder schicken Sie Ihre Zeiten stattdessen als PDF-Datei per E-Mail an die Lehrkraft.';
+
+/**
+ * Warum das Senden an den Briefkasten nicht geklappt hat und was die Eltern jetzt tun können.
+ * `retry: false` – ein erneuter Versuch hilft voraussichtlich nicht (dann zuerst der Weg per E-Mail).
+ */
+function sendProblem(err) {
+  const later = { retry: true, advice: `Bitte versuchen Sie es gleich noch einmal. ${EMAIL_ADVICE}` };
+  const emailOnly = { retry: false, advice: 'Bitte schicken Sie Ihre Zeiten stattdessen als PDF-Datei per E-Mail an die Lehrkraft.' };
+  if (err instanceof MailboxError) {
+    if (err.status === 429) return { reason: 'Gerade kommen sehr viele Rückmeldungen an.', retry: true, advice: `Bitte warten Sie eine Minute und versuchen Sie es dann noch einmal. ${EMAIL_ADVICE}` };
+    if (err.status === 507) return { reason: 'Der Briefkasten der Lehrkraft ist voll.', ...emailOnly };
+    if (err.status >= 500) return { reason: 'Der digitale Briefkasten ist gerade gestört.', ...later };
+    if (err.status) return { reason: 'Der digitale Briefkasten hat Ihre Rückmeldung nicht angenommen.', ...emailOnly };
+    return { reason: err.message || 'Der digitale Briefkasten ist gerade nicht erreichbar.', ...(err.offline ? later : emailOnly) };
+  }
+  if (isNetworkError(err)) return { reason: friendlyError(err), ...later };
+  // Sonst ein Problem in diesem Browser (z. B. Verschlüsselung nicht möglich, Schlüssel im Link beschädigt).
+  // Technische Meldungen wie „DataError“ bekommen die Eltern nicht zu sehen.
+  return { reason: 'Ihre Rückmeldung konnte in diesem Browser nicht verschlüsselt werden.', ...emailOnly };
 }
 
 /** Eingabefeld, dessen id zugleich der data-testid ist. */
@@ -292,7 +394,18 @@ function renderLogin(ctx) {
       { class: 'card stack parent-loggedin' },
       h('h2', {}, 'Angemeldet für ', childName(ps.login)),
       h('p', { class: 'muted' }, info.classId ? `Klasse ${info.classId} · ` : '', 'Code ', h('span', { class: 'code' }, ps.login.code)),
-      ps.submittedAt ? alertBox('success', h('p', {}, `Sie haben Ihre Zeiten am ${formatTimestamp(ps.submittedAt)} abgesendet.`)) : null,
+      ps.submittedAt
+        ? alertBox(
+            'success',
+            h(
+              'p',
+              {},
+              ps.sentVia === 'mailbox'
+                ? `Ihre Zeiten sind am ${formatTimestamp(ps.sentAt || ps.submittedAt)} bei ${teacherDat(ps.event)} angekommen.`
+                : `Sie haben Ihre Zeiten am ${formatTimestamp(ps.submittedAt)} abgesendet.`,
+            ),
+          )
+        : null,
       h(
         'div',
         { class: 'parent-actions' },
@@ -307,9 +420,17 @@ function renderLogin(ctx) {
               const s = loadState();
               const hasTimes = Object.values(s.selection || {}).some((list) => Array.isArray(list) && list.length > 0);
               if (hasTimes || s.lastPayload) {
+                let question = 'Haben Sie die PDF-Datei schon an die Lehrkraft geschickt?';
+                if (s.sentVia === 'mailbox' && s.lastPayload && s.event && changedAfterSubmit(s)) {
+                  question = 'Ihre Änderungen nach dem Absenden sind noch nicht bei der Lehrkraft.';
+                } else if (s.sentVia === 'mailbox') {
+                  question = 'Ihre abgesendete Rückmeldung ist bereits bei der Lehrkraft angekommen.';
+                } else if (!s.lastPayload && canUseMailbox(s.event)) {
+                  question = 'Haben Sie Ihre Zeiten schon abgesendet?';
+                }
                 const ok = await confirmDialog({
                   title: 'Abmelden?',
-                  message: `Die markierten Zeiten für ${childName(s.login)} werden aus diesem Browser gelöscht. Haben Sie die PDF-Datei schon an die Lehrkraft geschickt?`,
+                  message: `Die markierten Zeiten für ${childName(s.login)} werden aus diesem Browser gelöscht. ${question}`,
                   confirmText: 'Ja, abmelden',
                   cancelText: 'Zurück',
                 });
@@ -365,8 +486,10 @@ function renderLogin(ctx) {
       invalid[0]?.focus();
     };
 
-    const onSubmit = (e) => {
+    let busy = false;
+    const onSubmit = async (e) => {
       e.preventDefault();
+      if (busy) return;
       const values = { firstName: first.value, lastName: last.value, code: code.value };
       const typedKey = keyShown ? key.value.trim() : '';
       let result;
@@ -401,11 +524,28 @@ function renderLogin(ctx) {
           return;
         }
         ev = { ...ev, classId: result.parsed.classId, teacherCode: result.parsed.teacherCode };
+        if (mailboxEnabled()) {
+          // Digitaler Briefkasten: Name, Schule und Briefkasten der Lehrkraft nachschlagen. Klappt das
+          // nicht, geht es ohne Meldung wie bisher weiter (Rückmeldung dann per E-Mail).
+          busy = true;
+          setBusy(submit, true, 'Termindaten werden geladen …');
+          const found = await findLetterData(ev, { teacherCode: result.parsed.teacherCode, classId: result.parsed.classId });
+          busy = false;
+          if (!form.isConnected) return;
+          setBusy(submit, false);
+          const checked = found ? checkStudentLogin(values, expectedFor(found)) : null;
+          if (checked?.ok) {
+            ev = found;
+            result = checked;
+          }
+        }
       }
       const s = loadState();
       const login = { firstName: cleanName(values.firstName), lastName: cleanName(values.lastName), code: result.code };
       if (!s.login || s.login.code !== login.code || !s.event || !sameSchedule(s.event, ev)) {
         s.selection = {};
+        clearSubmission(s);
+      } else if (mailboxChanged(s, s.event, ev)) {
         clearSubmission(s);
       }
       if (!s.login || s.login.code !== login.code) {
@@ -418,7 +558,7 @@ function renderLogin(ctx) {
       navigate('/eltern/zeiten');
     };
 
-    return h(
+    const form = h(
       'form',
       { class: 'card stack parent-login', novalidate: true, onsubmit: onSubmit },
       h('h2', {}, 'Anmeldung für Eltern'),
@@ -450,6 +590,7 @@ function renderLogin(ctx) {
           )
         : null,
     );
+    return form;
   }
 }
 
@@ -493,10 +634,12 @@ function renderTimes(ctx) {
   const selection = cleanSelection(ps, days);
   const info = classInfo(ps);
   const views = new Map();
+  const viaMailbox = canUseMailbox(event);
 
+  const selectionCopy = () => Object.fromEntries(Object.entries(selection).map(([d, list]) => [d, [...list]]));
   const persist = () => {
     const s = loadState();
-    s.selection = Object.fromEntries(Object.entries(selection).map(([d, list]) => [d, [...list]]));
+    s.selection = selectionCopy();
     saveParentState(s);
   };
 
@@ -541,24 +684,43 @@ function renderTimes(ctx) {
 
   // --- Absenden ---
   const submitHint = h('p', { class: 'parent-submit-hint', id: 'parent-submit-hint', 'aria-live': 'polite' });
-  const submitError = h('div', { 'aria-live': 'polite' });
+  const submitError = h('div', { class: 'parent-submit-error', 'aria-live': 'polite' });
   const submitBtn = h(
     'button',
     { type: 'button', class: 'btn btn-success btn-large btn-block parent-submit', 'data-testid': 'parent-submit', 'aria-describedby': 'parent-submit-hint', onclick: onSubmit },
     'Absenden',
   );
+  // Fehler beim Senden an den Briefkasten: Statt „Absenden“ stehen dann „Erneut versuchen“ und
+  // „Stattdessen per E-Mail senden“ zur Wahl.
+  let sendFailed = false;
+  // Solange gesendet wird, bleibt „Absenden“ gesperrt – auch wenn die Eltern dabei Zeiten ändern
+  // (sonst ginge die Rückmeldung doppelt hinaus).
+  let sending = false;
+
+  const selectedCount = () => Object.values(selection).reduce((n, list) => n + list.length, 0);
 
   const refreshSubmit = () => {
-    const total = Object.values(selection).reduce((n, list) => n + list.length, 0);
-    submitBtn.disabled = total === 0;
+    const total = selectedCount();
+    submitBtn.disabled = total === 0 || sending;
     if (total === 0) {
       submitHint.textContent = 'Bitte markieren Sie zuerst mindestens einen Zeitslot, zu dem Sie Zeit hätten.';
       submitHint.classList.remove('parent-submit-hint-ok');
     } else {
       const rangeCount = days.reduce((n, d) => n + slotsToRanges(selection[d.date], slot).length, 0);
-      submitHint.textContent = `Sie haben ${rangeCount === 1 ? '1 Zeitraum' : `${rangeCount} Zeiträume`} markiert. Nach dem Absenden wird eine PDF-Datei mit Ihren Zeiten heruntergeladen.`;
+      // Nach einem Fehler beim Senden sagt der Fehlerkasten darunter, wie es weitergeht.
+      let next = 'Nach dem Absenden wird eine PDF-Datei mit Ihren Zeiten heruntergeladen.';
+      if (sendFailed) next = '';
+      else if (viaMailbox) next = `Nach dem Absenden werden Ihre Zeiten verschlüsselt an ${teacherAcc(event)} übermittelt.`;
+      submitHint.textContent = `Sie haben ${rangeCount === 1 ? '1 Zeitraum' : `${rangeCount} Zeiträume`} markiert. ${next}`.trim();
       submitHint.classList.add('parent-submit-hint-ok');
     }
+  };
+
+  const clearSendError = () => {
+    sendFailed = false;
+    submitBtn.hidden = false;
+    mount(submitError);
+    refreshSubmit();
   };
 
   const refreshDay = (date) => {
@@ -583,6 +745,8 @@ function renderTimes(ctx) {
 
   const changed = (date) => {
     refreshDay(date);
+    // Nach einer Änderung wieder mit „Absenden“ beginnen (nicht, während ein erneuter Versuch läuft)
+    if (sendFailed && !sending) clearSendError();
     refreshSubmit();
     persist();
   };
@@ -702,45 +866,168 @@ function renderTimes(ctx) {
     );
   };
 
+  const buildPayload = () => {
+    const availability = {};
+    for (const day of days) availability[day.date] = slotsToRanges(selection[day.date] || [], slot);
+    return buildResponsePayload({
+      code: ps.login.code,
+      firstName: ps.login.firstName,
+      lastName: ps.login.lastName,
+      classId: info.classId,
+      teacherCode: info.teacherCode,
+      slotMinutes: slot,
+      availability,
+    });
+  };
+
+  /** Abgesendete Rückmeldung merken und zur Fertig-Seite. */
+  const finish = (payload, extra) => {
+    const s = loadState();
+    // Dauerte das Senden so lange, dass die Eltern sich inzwischen abgemeldet oder ein anderes Kind
+    // angemeldet haben, darf dessen Stand weder diese Zeiten noch „angekommen“ bekommen.
+    if (!s.login || !codesEqual(s.login.code, payload.code) || !s.event || !sameSchedule(s.event, event)) {
+      if (extra.sentVia === 'mailbox') toast(`Die Rückmeldung für ${childName(payload)} ist bei ${teacherDat(event)} angekommen.`, 'success', 8000);
+      return;
+    }
+    s.selection = selectionCopy();
+    clearSubmission(s);
+    s.submittedAt = payload.submittedAt;
+    s.lastPayload = payload;
+    Object.assign(s, extra);
+    saveParentState(s);
+    navigate('/eltern/fertig');
+  };
+
+  /** Bisheriger Weg (und Notlösung): Rückmelde-PDF herunterladen, danach E-Mail. Wirft bei Fehlern. */
+  const sendByEmail = async () => {
+    const payload = buildPayload();
+    const { doc, filename } = await createResponsePdf(payload, event);
+    const saved = savePdf(doc, filename);
+    finish(payload, { sentVia: 'email', lastFilename: saved });
+  };
+
+  /** Digitaler Briefkasten: verschlüsselt in den Briefkasten der Lehrkraft. Wirft bei Fehlern (z. B. MailboxError). */
+  const sendByMailbox = async (button) => {
+    const payload = buildPayload();
+    const stopNotice = slowNotice(button);
+    let result;
+    try {
+      result = await sendToMailbox(event.mailbox, payload);
+    } finally {
+      stopNotice();
+    }
+    const at = new Date(Number(result?.createdAt) || Date.now());
+    finish(payload, { sentVia: 'mailbox', sentAt: Number.isNaN(at.getTime()) ? new Date().toISOString() : at.toISOString() });
+  };
+
+  /** Nichts mehr markiert (z. B. während des Sendens gelöscht)? Dann wieder „Absenden“ mit Hinweis. */
+  const nothingSelected = () => {
+    if (selectedCount() > 0) return false;
+    clearSendError();
+    refreshSubmit();
+    return true;
+  };
+
+  /**
+   * Senden an den Briefkasten ist gescheitert: freundliche Meldung mit „Erneut versuchen“ und
+   * „Stattdessen per E-Mail senden“ (bisheriger Weg mit PDF und E-Mail). Hilft ein erneuter Versuch
+   * voraussichtlich nicht (z. B. Briefkasten voll), steht der Weg per E-Mail vorn.
+   */
+  function showSendError(err, { again = false, pdfError = null } = {}) {
+    sendFailed = true;
+    submitBtn.hidden = true;
+    refreshSubmit();
+    const problem = sendProblem(err);
+    // Der zweite Klick eines Doppelklicks auf „Absenden“ darf keinen der neuen Knöpfe auslösen.
+    const accept = (e) => !(e.detail > 1);
+    const retryBtn = h('button', { type: 'button', class: `btn ${problem.retry ? 'btn-success' : 'btn-secondary'} btn-large`, 'data-testid': 'parent-retry' }, 'Erneut versuchen');
+    const fallbackBtn = h('button', { type: 'button', class: `btn ${problem.retry ? 'btn-secondary' : 'btn-success'} btn-large`, 'data-testid': 'parent-fallback' }, 'Stattdessen per E-Mail senden');
+    retryBtn.addEventListener('click', async (e) => {
+      if (!accept(e) || retryBtn.disabled || nothingSelected()) return;
+      sending = true;
+      setBusy(retryBtn, true, 'Wird gesendet …');
+      fallbackBtn.disabled = true;
+      try {
+        await sendByMailbox(retryBtn);
+      } catch (err2) {
+        sending = false;
+        if (submitError.isConnected) showSendError(err2, { again: true });
+      }
+    });
+    fallbackBtn.addEventListener('click', async (e) => {
+      if (!accept(e) || fallbackBtn.disabled || nothingSelected()) return;
+      sending = true;
+      setBusy(fallbackBtn, true, 'PDF wird erstellt …');
+      retryBtn.disabled = true;
+      try {
+        await sendByEmail();
+      } catch (err2) {
+        sending = false;
+        if (submitError.isConnected) showSendError(err, { again, pdfError: err2 });
+      }
+    });
+    const buttons = problem.retry ? [retryBtn, fallbackBtn] : [fallbackBtn, retryBtn];
+    mount(
+      submitError,
+      alertBox(
+        'error',
+        h('p', { class: 'parent-send-error-title' }, h('strong', {}, again ? 'Leider hat es wieder nicht geklappt. ' : '', 'Ihre Rückmeldung konnte gerade nicht übermittelt werden.')),
+        h('p', {}, problem.reason),
+        pdfError ? h('p', {}, h('strong', {}, 'Die PDF-Datei konnte nicht erstellt werden. '), friendlyError(pdfError)) : null,
+        h('p', {}, pdfError ? 'Bitte versuchen Sie es gleich noch einmal.' : problem.advice),
+        h('div', { class: 'parent-actions parent-send-actions' }, buttons),
+      ),
+    );
+    buttons[0].focus();
+  }
+
   async function onSubmit() {
-    if (submitBtn.disabled) return;
-    mount(submitError);
+    if (submitBtn.disabled || sending) return;
+    clearSendError();
+    sending = true;
+    if (viaMailbox) {
+      setBusy(submitBtn, true, 'Wird gesendet …');
+      try {
+        await sendByMailbox(submitBtn);
+      } catch (err) {
+        sending = false;
+        setBusy(submitBtn, false);
+        refreshSubmit();
+        if (submitError.isConnected) showSendError(err);
+      }
+      return;
+    }
     setBusy(submitBtn, true, 'PDF wird erstellt …');
     try {
-      const availability = {};
-      for (const day of days) availability[day.date] = slotsToRanges(selection[day.date] || [], slot);
-      const payload = buildResponsePayload({
-        code: ps.login.code,
-        firstName: ps.login.firstName,
-        lastName: ps.login.lastName,
-        classId: info.classId,
-        teacherCode: info.teacherCode,
-        slotMinutes: slot,
-        availability,
-      });
-      const { doc, filename } = await createResponsePdf(payload, event);
-      const saved = savePdf(doc, filename);
-      const s = loadState();
-      s.selection = Object.fromEntries(Object.entries(selection).map(([d, list]) => [d, [...list]]));
-      s.submittedAt = payload.submittedAt;
-      s.lastPayload = payload;
-      s.lastFilename = saved;
-      saveParentState(s);
-      navigate('/eltern/fertig');
+      await sendByEmail();
     } catch (err) {
+      sending = false;
       setBusy(submitBtn, false);
       refreshSubmit();
       mount(submitError, alertBox('error', h('p', {}, h('strong', {}, 'Die PDF-Datei konnte nicht erstellt werden. '), friendlyError(err))));
     }
   }
 
-  const submitted = ps.submittedAt
-    ? alertBox(
-        'success',
-        h('p', {}, `Sie haben Ihre Zeiten am ${formatTimestamp(ps.submittedAt)} abgesendet. `, h('a', { href: '#/eltern/fertig' }, 'Zur E-Mail an die Lehrkraft')),
-        h('p', { class: 'small' }, 'Wenn Sie etwas ändern, klicken Sie danach bitte erneut auf „Absenden“ und schicken Sie die neue PDF-Datei an die Lehrkraft.'),
-      )
-    : null;
+  let submitted = null;
+  if (ps.submittedAt && ps.sentVia === 'mailbox') {
+    submitted = alertBox(
+      'success',
+      h('p', {}, `Ihre Zeiten sind am ${formatTimestamp(ps.sentAt || ps.submittedAt)} bei ${teacherDat(event)} angekommen. `, h('a', { href: '#/eltern/fertig' }, 'Zur Bestätigung')),
+      h('p', { class: 'small' }, 'Wenn Sie etwas ändern, klicken Sie danach bitte erneut auf „Absenden“. Bei der Lehrkraft gilt immer Ihre zuletzt gesendete Rückmeldung.'),
+    );
+  } else if (ps.submittedAt) {
+    submitted = alertBox(
+      'success',
+      h('p', {}, `Sie haben Ihre Zeiten am ${formatTimestamp(ps.submittedAt)} abgesendet. `, h('a', { href: '#/eltern/fertig' }, 'Zur E-Mail an die Lehrkraft')),
+      h(
+        'p',
+        { class: 'small' },
+        viaMailbox
+          ? 'Wenn Sie etwas ändern, klicken Sie danach bitte erneut auf „Absenden“.'
+          : 'Wenn Sie etwas ändern, klicken Sie danach bitte erneut auf „Absenden“ und schicken Sie die neue PDF-Datei an die Lehrkraft.',
+      ),
+    );
+  }
 
   mount(
     root,
@@ -833,6 +1120,42 @@ function canShareFiles() {
   }
 }
 
+/** PDF bei Bedarf aus der gespeicherten Rückmeldung (neu) erzeugen – gleiche Daten wie beim Absenden. */
+function pdfMaker(payload, event) {
+  let pdfPromise = null;
+  return () => {
+    if (!pdfPromise) {
+      pdfPromise = createResponsePdf(payload, event).catch((err) => {
+        pdfPromise = null;
+        throw err;
+      });
+    }
+    return pdfPromise;
+  };
+}
+
+/** Wurde die Auswahl nach dem Absenden geändert? */
+function changedAfterSubmit(ps) {
+  const event = ps.event;
+  const slot = slotLength(event);
+  const current = cleanSelection(ps, eventDays(event));
+  return (event.days || []).some(
+    (d) => JSON.stringify(slotsToRanges(current[d.date] || [], slot)) !== JSON.stringify(ps.lastPayload?.availability?.[d.date] || []),
+  );
+}
+
+/** Abgesendete Zeiten je Tag. */
+function timesList(event, payload) {
+  return h(
+    'ul',
+    { class: 'parent-done-times' },
+    (event.days || []).map((d) => {
+      const ranges = payload.availability?.[d.date] || [];
+      return h('li', {}, h('strong', {}, formatDateWithWeekday(d.date)), ': ', ranges.length ? formatRanges(ranges) : h('span', { class: 'muted' }, 'keine Zeit'));
+    }),
+  );
+}
+
 function renderDone(ctx) {
   const { root, setTitle, navigate } = ctx;
   const ps = loadState();
@@ -853,24 +1176,18 @@ function renderDone(ctx) {
     navigate('/eltern/zeiten', { replace: true });
     return;
   }
+  if (ps.sentVia === 'mailbox') {
+    renderSent(ctx, ps);
+    return;
+  }
   setTitle('Fast geschafft');
   const event = ps.event;
   const filename = ps.lastFilename || 'Rückmeldung.pdf';
   const subject = mailSubject(payload);
   const knownEmail = event.teacherEmail || '';
-  const teacherLabel = event.teacherName || 'die Lehrkraft';
+  const teacherLabel = teacherAcc(event);
 
-  // PDF bei Bedarf aus der gespeicherten Rückmeldung neu erzeugen (gleiche Daten wie beim Absenden).
-  let pdfPromise = null;
-  const getPdf = () => {
-    if (!pdfPromise) {
-      pdfPromise = createResponsePdf(payload, event).catch((err) => {
-        pdfPromise = null;
-        throw err;
-      });
-    }
-    return pdfPromise;
-  };
+  const getPdf = pdfMaker(payload, event);
 
   // --- E-Mail ---
   const mailLink = h('a', { class: 'btn btn-primary btn-large parent-mail-btn', 'data-testid': 'parent-mailto' }, 'E-Mail an die Lehrkraft schreiben');
@@ -985,12 +1302,7 @@ function renderDone(ctx) {
     'PDF erneut herunterladen',
   );
 
-  // Wurde die Auswahl nach dem Absenden geändert?
-  const slot = slotLength(event);
-  const current = cleanSelection(ps, eventDays(event));
-  const changedSince = (event.days || []).some(
-    (d) => JSON.stringify(slotsToRanges(current[d.date] || [], slot)) !== JSON.stringify(payload.availability?.[d.date] || []),
-  );
+  const changedSince = changedAfterSubmit(ps);
 
   // Nummer und Überschrift in einer Zeile, der Inhalt nutzt am Smartphone die volle Breite.
   const step = (num, title, ...children) =>
@@ -1001,14 +1313,7 @@ function renderDone(ctx) {
       h('div', { class: 'parent-step-body stack-small' }, ...children),
     );
 
-  const summaryList = h(
-    'ul',
-    { class: 'parent-done-times' },
-    (event.days || []).map((d) => {
-      const ranges = payload.availability?.[d.date] || [];
-      return h('li', {}, h('strong', {}, formatDateWithWeekday(d.date)), ': ', ranges.length ? formatRanges(ranges) : h('span', { class: 'muted' }, 'keine Zeit'));
-    }),
-  );
+  const summaryList = timesList(event, payload);
 
   const onLogout = async () => {
     const ok = await confirmDialog({
@@ -1072,6 +1377,97 @@ function renderDone(ctx) {
         h('a', { class: 'btn btn-secondary', href: '#/eltern/zeiten' }, 'Zeiten ändern'),
         h('button', { type: 'button', class: 'btn btn-ghost', 'data-testid': 'parent-logout', onclick: onLogout }, 'Fertig – abmelden'),
       ),
+    ),
+  );
+}
+
+// ---------- Schritt 3 mit digitalem Briefkasten: angekommen ----------
+
+/** Fertig-Seite, wenn die Rückmeldung über den digitalen Briefkasten angekommen ist: Es ist nichts mehr zu tun. */
+function renderSent(ctx, ps) {
+  const { root, setTitle, navigate } = ctx;
+  setTitle('Rückmeldung angekommen');
+  const event = ps.event;
+  const payload = ps.lastPayload;
+  const info = classInfo(ps);
+  const changedSince = changedAfterSubmit(ps);
+  const getPdf = pdfMaker(payload, event);
+
+  // Beleg für die eigenen Unterlagen (dieselbe PDF-Datei wie beim Weg per E-Mail)
+  const downloadBtn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'btn btn-secondary',
+      'data-testid': 'parent-download',
+      onclick: async () => {
+        setBusy(downloadBtn, true, 'PDF wird erstellt …');
+        try {
+          const { doc, filename } = await getPdf();
+          savePdf(doc, filename);
+          toast('Der Beleg wurde als PDF-Datei gespeichert.', 'success');
+        } catch (err) {
+          toast(`Die PDF-Datei konnte nicht erstellt werden. ${friendlyError(err)}`, 'error', 8000);
+        } finally {
+          setBusy(downloadBtn, false);
+        }
+      },
+    },
+    'Beleg als PDF speichern',
+  );
+
+  const onLogout = async () => {
+    const ok = await confirmDialog({
+      title: 'Fertig und abmelden?',
+      message: changedSince
+        ? 'Ihre Änderungen nach dem Absenden sind noch nicht bei der Lehrkraft. Wenn Sie sich jetzt abmelden, werden sie aus diesem Browser gelöscht.'
+        : `Ihre Rückmeldung ist bei ${teacherDat(event)} angekommen. Ihre markierten Zeiten werden nur aus diesem Browser gelöscht.`,
+      confirmText: 'Ja, abmelden',
+      cancelText: 'Zurück',
+    });
+    if (!ok) return;
+    clearParentState();
+    navigate('/');
+  };
+
+  mount(
+    root,
+    h(
+      'div',
+      { class: 'parent-page parent-done parent-sent' },
+      h(
+        'section',
+        { class: 'parent-sent-hero', 'data-testid': 'parent-sent-ok', 'aria-labelledby': 'parent-sent-title' },
+        h('span', { class: 'parent-sent-check', 'aria-hidden': 'true' }, '✓'),
+        h('h1', { id: 'parent-sent-title' }, 'Vielen Dank!'),
+        // Nach einer Änderung stimmt „nichts weiter tun“ nicht mehr – dann folgt der Hinweis zum erneuten Absenden.
+        changedSince
+          ? h('p', { class: 'parent-sent-lead' }, `Ihre zuletzt gesendete Rückmeldung ist bei ${teacherDat(event)} angekommen.`)
+          : h('p', { class: 'parent-sent-lead' }, `Ihre Rückmeldung ist bei ${teacherDat(event)} angekommen. `, h('strong', {}, 'Sie müssen nichts weiter tun.')),
+      ),
+      changedSince
+        ? alertBox(
+            'warning',
+            h('p', {}, h('strong', {}, 'Sie haben Ihre Zeiten nach dem Absenden geändert. '), 'Die Änderungen sind noch nicht bei der Lehrkraft. Bitte klicken Sie unter „Zeiten ändern“ erneut auf „Absenden“.'),
+          )
+        : null,
+      h(
+        'section',
+        { class: 'card stack-small parent-done-summary', 'aria-labelledby': 'parent-done-summary-title' },
+        h('h2', { id: 'parent-done-summary-title' }, 'Ihre gesendeten Zeiten'),
+        h('p', { class: 'muted small' }, `${childName(payload)}${info.classId ? `, Klasse ${info.classId}` : ''} · gesendet am ${formatTimestamp(ps.sentAt || payload.submittedAt)}`),
+        timesList(event, payload),
+        h('p', { class: 'muted small' }, `Ihre Angaben wurden verschlüsselt übermittelt. Nur ${teacherAcc(event)} kann sie lesen.`),
+        h('div', { class: 'parent-actions' }, downloadBtn),
+      ),
+      h(
+        'section',
+        { class: 'card stack-small parent-sent-change', 'aria-labelledby': 'parent-sent-change-title' },
+        h('h2', { id: 'parent-sent-change-title' }, 'Möchten Sie etwas ändern?'),
+        h('p', {}, 'Klicken Sie auf „Zeiten ändern“ und danach erneut auf „Absenden“. Bei der Lehrkraft gilt immer Ihre zuletzt gesendete Rückmeldung.'),
+        h('div', { class: 'parent-actions' }, h('a', { class: 'btn btn-secondary', href: '#/eltern/zeiten' }, 'Zeiten ändern')),
+      ),
+      h('div', { class: 'parent-actions parent-done-links' }, h('button', { type: 'button', class: 'btn btn-ghost', 'data-testid': 'parent-logout', onclick: onLogout }, 'Fertig – abmelden')),
     ),
   );
 }

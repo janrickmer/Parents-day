@@ -1,5 +1,6 @@
-// Speicherung im Browser (localStorage). ParentsDay hat keinen Server: alle Daten der Lehrkraft
-// liegen nur in diesem Browser und in heruntergeladenen Zwischenspeicher-Dateien.
+// Speicherung im Browser (localStorage). ParentsDay hat keinen eigenen Server: alle Daten der Lehrkraft
+// liegen nur in diesem Browser und in heruntergeladenen Zwischenspeicher-Dateien. (Der optionale digitale
+// Briefkasten hält nur verschlüsselte Rückmeldungen und Elternbrief-Angaben, siehe core/mailbox.js.)
 //
 // Datenmodell der Lehrkraft (TeacherState, Version 1):
 // {
@@ -429,7 +430,11 @@ export function onDraftPendingChange(fn) {
 // --- Elternseite ---
 // ParentState: { event: EventInfo|null, login: {firstName,lastName,code}|null, selection: {'JJJJ-MM-TT': [slotStartMinuten…]},
 //                submittedAt?: string, lastPayload?: ResponsePayload, lastFilename?: string,
+//                sentVia?: 'mailbox'|'email',   // Weg der letzten Rückmeldung: digitaler Briefkasten oder PDF/E-Mail
+//                sentAt?: ISO-Zeitstempel,      // Zeitpunkt, zu dem der Briefkasten die Rückmeldung angenommen hat
 //                teacherEmailInput?: string, teacherEmailFor?: string }
+// EventInfo (core/transport.js) enthält mit Briefkasten zusätzlich mailbox?: { id, publicKey } – nie Geheimnis
+// oder privaten Schlüssel.
 // Jeder Tab arbeitet mit seinem eigenen Stand (sessionStorage) – Eltern mit mehreren Kindern öffnen
 // die QR-Codes oft in mehreren Tabs; so vermischen sich die Angaben nicht. Zusätzlich wird der zuletzt
 // gespeicherte Stand im localStorage abgelegt: ein neuer Tab (oder ein späterer Besuch) beginnt damit.

@@ -4,6 +4,7 @@ import { h, mount, toast, clearToasts, modal, fileDropZone, confirmDialog, alert
 import { getCurrentState, replaceState, loadEventDraft, storeEventDraft, clearEventDraft } from '../core/storage.js';
 import { downloadBackup, readBackupFile } from '../core/backup.js';
 import { formatTimestamp } from '../core/time.js';
+import { mailboxEnabled, isValidTeacherMailbox } from '../core/mailbox.js';
 
 const EMPTY_DEVICE_KEY = 'parentsday.emptyDevice';
 
@@ -44,6 +45,37 @@ function targetPath(state, eventDraft) {
 }
 
 /**
+ * Digitaler Briefkasten beim Laden eines Zwischenstands: Sein Schlüssel steht nur im Browser und im
+ * Zwischenspeicher. Enthält die Datei keinen Briefkasten (z. B. von vor dem ersten Elternbrief), bleibt der
+ * Briefkasten dieses Browsers erhalten – sonst wären alle Rückmeldungen darin für immer unlesbar.
+ * Enthält sie einen anderen, gilt der aus der Datei (die Elternbriefe dazu sind meist schon verteilt).
+ * @returns {{keep: object|null, replaced: boolean}}
+ */
+function mailboxOnLoad(loaded, current) {
+  const own = isValidTeacherMailbox(current?.mailbox) ? current.mailbox : null;
+  if (!own) return { keep: null, replaced: false };
+  if (!loaded.mailbox) return { keep: own, replaced: false };
+  return { keep: null, replaced: loaded.mailbox.id !== own.id };
+}
+
+/** Hinweis im Dialog „Stand ersetzen?“ zum digitalen Briefkasten (nur, wenn er eingerichtet ist). */
+function mailboxNote({ keep, replaced }) {
+  if (!mailboxEnabled()) return null;
+  if (keep) return h('p', {}, 'Ihr digitaler Briefkasten aus diesem Browser bleibt erhalten – der Zwischenstand enthält noch keinen.');
+  if (!replaced) return null;
+  return alertBox(
+    'warning',
+    h(
+      'p',
+      {},
+      h('strong', {}, 'Achtung: '),
+      'Dieser Zwischenstand enthält einen anderen digitalen Briefkasten als dieser Browser. Danach gilt der Briefkasten aus dem Zwischenstand. Rückmeldungen im Briefkasten dieses Browsers, die noch nicht abgerufen wurden, können Sie dann nur noch mit einem Zwischenstand von jetzt lesen.',
+    ),
+    h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: (e) => e.detail > 1 || saveBackupNow() }, 'Aktuellen Stand speichern'),
+  );
+}
+
+/**
  * Dialog „Zwischenstand laden“. Nach dem Laden geht es auf der passenden Seite weiter.
  * @param {{navigate: (path:string, opts?:object) => void}} opts
  */
@@ -72,10 +104,14 @@ export function openLoadBackupDialog({ navigate }) {
                 { class: 'stack-small' },
                 h('p', {}, `Zwischenstand von ${state.teacher.firstName} ${state.teacher.lastName} vom ${formatTimestamp(state.savedAt)}: ${classes}${state.event ? '' : ', noch kein Elternsprechtag'}.`),
                 h('p', {}, 'Er ersetzt alle aktuellen Daten in diesem Browser.'),
+                mailboxNote(mailboxOnLoad(state, getCurrentState() || current)),
               ),
               confirmText: 'Ja, laden',
             });
             if (!ok) return;
+            // Erst jetzt entscheiden: Der Briefkasten kann während der Rückfrage entstanden sein.
+            const { keep } = mailboxOnLoad(state, getCurrentState() || current);
+            if (keep) state.mailbox = keep;
             const saved = replaceState(state);
             if (eventDraft) storeEventDraft(saved, eventDraft);
             else clearEventDraft(saved);
