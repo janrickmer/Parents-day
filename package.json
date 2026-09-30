@@ -1,0 +1,15 @@
+{
+  "name": "parentsday",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ParentsDay – Portal zur Terminabstimmung für den Elternsprechtag (statische Web-App)",
+  "type": "module",
+  "scripts": {
+    "start": "http-server . -p 8080 -c-1",
+    "test": "node --test \"tests/unit/**/*.test.mjs\"",
+    "test:e2e": "node --test --test-concurrency=1 \"tests/e2e/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}
