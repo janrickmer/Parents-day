@@ -18,7 +18,7 @@ import { savePdf, preloadPdf } from '../core/pdf.js';
 import { createResponseImporter } from '../components/response-import.js';
 import { mailboxEnabled, MailboxError } from '../core/mailbox.js';
 import { ensureTeacherMailbox, hasTeacherMailbox, publishClassDirectory } from '../core/teacher-mailbox.js';
-import { loadCloudConfig, hasCloudKeys } from '../core/cloud-sync.js';
+import { isCloudConnected } from '../core/cloud-sync.js';
 
 const SAVE_DELAY = 300;
 const MAX_NAME = 80;
@@ -133,10 +133,6 @@ function parsePastedNames(text, field) {
 
 // ---------- View ----------
 
-/** Ist die Cloud-Sicherung der Lehrkraft auf diesem Gerät verbunden (der Stand wird dort gesichert)? */
-function cloudConnected(code) {
-  return Boolean(loadCloudConfig(code)) && hasCloudKeys(code);
-}
 
 export default function render(ctx) {
   const { root, params, navigate, setTitle } = ctx;
@@ -867,7 +863,7 @@ export default function render(ctx) {
               : 'Der digitale Briefkasten konnte nicht eingerichtet werden. Die Eltern schicken ihre Rückmeldung deshalb per E-Mail.',
             // Der Schlüssel zum Briefkasten liegt nur in diesem Browser (und im Zwischenspeicher) – mit
             // Cloud-Sicherung auch dort, dann braucht es keinen Zwischenstand.
-            withMailbox && !hadMailbox && !cloudConnected(current.teacher.teacherCode)
+            withMailbox && !hadMailbox && !isCloudConnected(current.teacher.teacherCode)
               ? ' Tipp: Speichern Sie jetzt einen Zwischenstand. Nur damit können Sie die Rückmeldungen auch auf einem anderen Gerät oder nach dem Löschen der Browserdaten lesen.'
               : null,
           ),

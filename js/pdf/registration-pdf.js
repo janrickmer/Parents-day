@@ -158,14 +158,13 @@ export async function createRegistrationPdf(teacher) {
   y = writeParagraph(doc, 'So melden Sie sich an', y, { size: 14, bold: true, color: COLORS.primary, spacingAfter: 2.5 });
   y = writeStep(doc, 1, `Öffnen Sie ${PUBLIC_URL} und klicken Sie auf „Zugang für Lehrkräfte“ und danach auf „Anmelden“.`, y, { url: PUBLIC_URL });
   y = writeStep(doc, 2, 'Laden Sie diese PDF-Datei hoch – oder geben Sie Vorname, Nachname, Geburtsdatum und Registrierungscode ein.', y);
-  if (mailboxEnabled()) y = writeStep(doc, 3, 'An einem neuen Gerät geben Sie danach Ihr Passwort für die Cloud-Sicherung ein – dann ist Ihr aktueller Stand sofort da.', y);
   y += 4;
 
   y = writeParagraph(doc, 'Gut zu wissen', y, { size: 14, bold: true, color: COLORS.primary, spacingAfter: 2.5 });
   y = writeParagraph(
     doc,
     mailboxEnabled()
-      ? `${APP_NAME} speichert Ihre Daten in dem Browser, mit dem Sie arbeiten, und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung. So ist Ihr aktueller Stand auf jedem Gerät da, an dem Sie sich anmelden. Ihr Passwort steht aus Sicherheitsgründen nicht in diesem Dokument; bewahren Sie es getrennt auf. Ohne das Passwort lässt sich die Cloud-Sicherung nicht entschlüsseln – auch nicht von ${APP_NAME}. Solange es auf einem Ihrer Geräte gemerkt ist, können Sie es dort unter „Weitere Einstellungen“ ändern.`
+      ? `${APP_NAME} speichert Ihre Daten in Ihrem Browser und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung. An einem neuen Gerät melden Sie sich an und geben das Passwort ein; dann ist Ihr aktueller Stand da. Ihr Passwort steht aus Sicherheitsgründen nicht in diesem Dokument. Ohne es lässt sich die Cloud-Sicherung nicht öffnen – auch nicht von ${APP_NAME}.`
       : `${APP_NAME} speichert Ihre Daten nur in dem Browser, mit dem Sie arbeiten – nicht auf einem Server. Möchten Sie an einem anderen Gerät weiterarbeiten, speichern Sie über „Zwischenstand speichern“ eine Datei und laden Sie diese dort nach der Anmeldung über „Zwischenstand laden“.`,
     y,
     { spacingAfter: 4 },

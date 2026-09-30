@@ -11,8 +11,8 @@ import { createRegistrationPdf } from '../pdf/registration-pdf.js';
 import { markEmptyDevice } from '../components/backup-actions.js';
 import { mailboxEnabled } from '../core/mailbox.js';
 import { cloudEnabled } from '../core/cloud.js';
-import { stopCloudSync, endCloudSession } from '../core/cloud-sync.js';
-import { newPasswordFields, rememberCheckbox, cloudAfterRegister, cloudAfterLogin, openUnlockDialog } from '../components/cloud-ui.js';
+import { stopCloudSync, endCloudSession, flushCloudSync } from '../core/cloud-sync.js';
+import { newPasswordFields, rememberCheckbox, cloudAfterRegister, cloudAfterLogin } from '../components/cloud-ui.js';
 
 const MIN_BIRTH_DATE = '1900-01-01';
 const NOT_REGISTRATION = 'Diese Datei ist keine ParentsDay-Registrierung.';
@@ -189,7 +189,11 @@ function sessionBanner(ctx) {
           {
             type: 'button',
             class: 'btn btn-ghost',
-            onclick: () => {
+            onclick: async (e) => {
+              if (e.detail > 1 || e.currentTarget.disabled) return;
+              e.currentTarget.disabled = true;
+              // Noch nicht hochgeladene Änderungen zuerst in die Cloud-Sicherung
+              await flushCloudSync();
               endCloudSession(state.teacher.teacherCode);
               stopCloudSync();
               clearSession();
@@ -326,7 +330,7 @@ function renderRegister(ctx) {
           h(
             'p',
             { class: 'muted small tauth-cloud-text' },
-            'Ihr Stand wird automatisch gesichert – mit diesem Passwort schon in Ihrem Browser verschlüsselt. An jedem anderen Gerät melden Sie sich an, geben das Passwort ein und haben alles da. Das Passwort steht nicht in der Registrierungs-PDF: Merken Sie es sich gut.',
+            'Ihr Stand wird automatisch gesichert – mit diesem Passwort schon in Ihrem Browser verschlüsselt. An jedem anderen Gerät melden Sie sich an, geben das Passwort ein und haben alles da. Das Passwort steht nicht in der Registrierungs-PDF: Merken Sie es sich gut. Hatten Sie schon eine Cloud-Sicherung, verwenden Sie dasselbe Passwort – dann wird Ihr Stand geladen.',
           ),
           h('div', { class: 'form-grid' }, pw.wraps),
           remember.wrap,
@@ -428,7 +432,7 @@ function renderRegister(ctx) {
     if (pw && password) {
       mount(submit, h('span', { class: 'spinner', 'aria-hidden': 'true' }), 'Cloud-Sicherung wird eingerichtet …');
       try {
-        cloud = await cloudAfterRegister(state.teacher, password, { remember: remember.input.checked });
+        cloud = await cloudAfterRegister(state.teacher, password, { remember: remember.input.checked, email: values.email });
       } catch (err) {
         console.warn(err);
         cloud = 'failed';
@@ -442,42 +446,14 @@ function renderRegister(ctx) {
 }
 
 /** Hinweis zur Cloud-Sicherung auf der Erfolgsseite der Registrierung. */
-function cloudRegisterNote(ctx, teacher, cloud) {
+function cloudRegisterNote(cloud) {
   if (!cloud) return null;
-  if (cloud === 'created') {
-    return alertBox('success', h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, 'Cloud-Sicherung eingerichtet. '), 'Ihr Stand wird ab jetzt automatisch gesichert. An einem anderen Gerät melden Sie sich an und geben Ihr Passwort ein.'));
-  }
-  if (cloud === 'restored') {
-    return alertBox('success', h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, 'Ihre Cloud-Sicherung wurde geladen. '), 'Für Sie gab es schon eine Cloud-Sicherung mit diesem Passwort – Ihr Stand ist jetzt auch auf diesem Gerät.'));
-  }
-  if (cloud === 'exists') {
-    return alertBox(
-      'warning',
-      h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, 'Für Sie gibt es bereits eine Cloud-Sicherung mit einem anderen Passwort. '), 'Geben Sie das bisherige Passwort ein, um Ihren Stand auf dieses Gerät zu holen.'),
-      h(
-        'p',
-        {},
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'btn btn-secondary',
-            'data-testid': 'reg-cloud-unlock',
-            onclick: async (e) => {
-              if (e.detail > 1) return;
-              const result = await openUnlockDialog({ teacher });
-              if (result === 'unlocked' || result === 'reset') ctx.rerender();
-            },
-          },
-          'Passwort eingeben',
-        ),
-      ),
-    );
-  }
-  return alertBox(
-    'info',
-    h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, 'Cloud-Sicherung eingerichtet. '), 'Die Cloud-Sicherung ist gerade nicht erreichbar – Ihr Stand wird hochgeladen, sobald eine Verbindung besteht.'),
-  );
+  const note = (type, strong, text) => alertBox(type, h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, strong), text));
+  if (cloud === 'created') return note('success', 'Cloud-Sicherung eingerichtet. ', 'Ihr Stand wird ab jetzt automatisch gesichert. An einem anderen Gerät melden Sie sich an und geben Ihr Passwort ein.');
+  if (cloud === 'restored') return note('success', 'Ihre Cloud-Sicherung wurde geladen. ', 'Mit diesem Passwort gab es schon eine Cloud-Sicherung – Ihr Stand ist jetzt auch auf diesem Gerät.');
+  if (cloud === 'kept') return note('info', 'Ihre Cloud-Sicherung bleibt verbunden. ', 'Dieses Gerät war schon mit Ihrer Cloud-Sicherung verbunden; daran ändert die erneute Registrierung nichts.');
+  if (cloud === 'failed') return note('warning', 'Die Cloud-Sicherung konnte nicht eingerichtet werden. ', 'Sie können sie später unter „Weitere Einstellungen“ einrichten.');
+  return note('info', 'Cloud-Sicherung eingerichtet. ', 'Die Cloud-Sicherung ist gerade nicht erreichbar – Ihr Stand wird hochgeladen, sobald eine Verbindung besteht.');
 }
 
 function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed, cloud = '' }) {
@@ -563,7 +539,7 @@ function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed, cloud = '' 
           h('dd', {}, teacher.email),
         ),
       ),
-      cloudRegisterNote(ctx, teacher, cloud),
+      cloudRegisterNote(cloud),
       existed && cloud !== 'restored'
         ? alertBox('info', h('p', {}, 'Für Sie waren in diesem Browser schon Daten gespeichert. Ihre Angaben wurden aktualisiert – Elternsprechtag, Klassen und Termine bleiben erhalten.'))
         : null,

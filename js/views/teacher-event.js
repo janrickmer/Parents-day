@@ -14,8 +14,7 @@ import { isValidEmail } from '../core/codes.js';
 import { mailboxEnabled, checkMailboxService } from '../core/mailbox.js';
 import { hasTeacherMailbox, fetchMailboxResponses, clearTeacherMailbox } from '../core/teacher-mailbox.js';
 import { UP_TO_DATE_REASONS } from '../core/responses.js';
-import { loadCloudConfig, deleteCloud, stopCloudSync } from '../core/cloud-sync.js';
-import { cloudErrorMessage } from '../core/cloud.js';
+import { isCloudConnected, loadCloudConfig, forgetCloudOnDevice, endCloudSession, stopCloudSync } from '../core/cloud-sync.js';
 import { cloudSettingsCard } from '../components/cloud-ui.js';
 
 // Höchstens MAX_DAYS Tage: Grenze des Termin-Schlüssels (siehe core/transport.js).
@@ -673,6 +672,7 @@ export default function render(ctx) {
     // Digitaler Briefkasten: wird vorher geleert (best effort), damit keine Kopien auf dem Server bleiben.
     const withMailbox = hasTeacherMailbox(getCurrentState() || saved);
     const withCloud = Boolean(loadCloudConfig(saved.teacher.teacherCode));
+    const cloudConnected = isCloudConnected(saved.teacher.teacherCode);
     const content = h(
       'div',
       { class: 'stack-small' },
@@ -685,7 +685,12 @@ export default function render(ctx) {
           )
         : null,
       withCloud
-        ? h('p', { 'data-testid': 'delete-all-cloud-note' }, 'Auch Ihre Cloud-Sicherung wird gelöscht – auf anderen Geräten wird danach nichts mehr abgeglichen.')
+        ? h(
+            'p',
+            { 'data-testid': 'delete-all-cloud-note' },
+            'Ihre Cloud-Sicherung bleibt erhalten: Melden Sie sich wieder an und geben Ihr Passwort ein, ist Ihr Stand wieder da.',
+            cloudConnected ? ' Möchten Sie auch sie löschen, nutzen Sie vorher oben „Cloud-Sicherung löschen“.' : '',
+          )
         : null,
       alertBox('warning', h('strong', {}, 'Wichtig: '), 'Speichern Sie vorher einen Zwischenstand, wenn Sie die Daten später noch brauchen. Mit dieser Datei können Sie alles wiederherstellen.'),
       h(
@@ -734,23 +739,15 @@ export default function render(ctx) {
         return;
       }
     }
-    // Cloud-Sicherung löschen (ohne Verbindung oder Passwort bleibt sie – darauf wird hingewiesen)
-    let cloudLeft = '';
-    if (withCloud) {
-      setBusy(deleteAllBtn, true, 'Wird gelöscht …');
-      try {
-        if (!(await deleteCloud(saved.teacher.teacherCode))) cloudLeft = 'Ihre Cloud-Sicherung konnte ohne Ihr Passwort nicht gelöscht werden. Melden Sie sich an, geben Sie das Passwort ein und löschen Sie sie unter „Weitere Einstellungen“.';
-      } catch (err) {
-        cloudLeft = `Ihre Cloud-Sicherung konnte nicht gelöscht werden (${cloudErrorMessage(err)}). Beim nächsten Anmelden mit Passwort ist Ihr Stand deshalb wieder da – Sie können sie dann unter „Weitere Einstellungen“ löschen.`;
-      }
-    }
+    // Die Verbindung zur Cloud-Sicherung gehört zu den Daten dieses Browsers – sie wird mit entfernt.
     stopCloudSync();
+    endCloudSession(saved.teacher.teacherCode);
+    forgetCloudOnDevice(saved.teacher.teacherCode);
     clearEventDraft(saved);
     setDraftPending(false);
     deleteTeacherState(saved.teacher.teacherCode);
     clearSession();
     toast('Ihre Daten wurden aus diesem Browser gelöscht.', 'success');
-    if (cloudLeft) toast(cloudLeft, 'warning', 14000);
     if (mailboxLeft) {
       toast(
         'Der digitale Briefkasten war nicht erreichbar und konnte nicht geleert werden. Die Rückmeldungen darin bleiben verschlüsselt – lesen kann sie nur, wer Ihren Schlüssel hat. Mit Ihrem Zwischenstand können Sie den Briefkasten später noch leeren.',
@@ -976,7 +973,7 @@ export default function render(ctx) {
       ),
       alertBox(
         'info',
-        loadCloudConfig(saved.teacher.teacherCode)
+        isCloudConnected(saved.teacher.teacherCode)
           ? h(
               'p',
               {},
@@ -1073,13 +1070,7 @@ export default function render(ctx) {
               'section',
               { class: 'card evt-danger', 'aria-labelledby': 'evt-danger-title' },
               h('h2', { id: 'evt-danger-title' }, 'Gefahrenbereich'),
-              h(
-                'p',
-                {},
-                'Entfernt Ihren Elternsprechtag, alle Klassen, Lernenden, Rückmeldungen und Termine aus diesem Browser',
-                loadCloudConfig(saved.teacher.teacherCode) ? ' und aus Ihrer Cloud-Sicherung' : '',
-                '. Anschließend werden Sie abgemeldet.',
-              ),
+              h('p', {}, 'Entfernt Ihren Elternsprechtag, alle Klassen, Lernenden, Rückmeldungen und Termine aus diesem Browser. Anschließend werden Sie abgemeldet.'),
               h('p', { class: 'muted small' }, 'Tipp: Speichern Sie vorher einen Zwischenstand, damit Sie Ihre Daten bei Bedarf wiederherstellen können.'),
               deleteAllBtn,
             ),

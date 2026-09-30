@@ -7,7 +7,7 @@ import { getSession, getCurrentState, clearSession, onStateChange, isDraftPendin
 import { saveBackupNow, openLoadBackupDialog } from './components/backup-actions.js';
 import { formatTimestamp } from './core/time.js';
 import { cloudEnabled } from './core/cloud.js';
-import { startCloudSync, stopCloudSync, flushCloudSync, getCloudStatus, endCloudSession, forgetCloudOnDevice } from './core/cloud-sync.js';
+import { startCloudSync, stopCloudSync, flushCloudSync, isCloudConnected, endCloudSession, forgetCloudOnDevice } from './core/cloud-sync.js';
 import { cloudIndicator, installCloudUi } from './components/cloud-ui.js';
 
 /**
@@ -180,15 +180,12 @@ function footer() {
   );
 }
 
-/** Ist die Cloud-Sicherung auf diesem Gerät verbunden (Passwort bekannt)? */
-function cloudConnected(status) {
-  return !['disabled', 'off', 'not-setup', 'needs-password'].includes(status.kind);
-}
+let loggingOut = false;
 
-async function onLogout() {
+async function onLogout(e) {
+  if (e?.detail > 1 || loggingOut) return;
   const code = getSession();
-  const status = getCloudStatus(code);
-  const connected = cloudConnected(status);
+  const connected = Boolean(code) && isCloudConnected(code);
   const removeBox = h('input', { type: 'checkbox', id: 'logout-remove', 'data-testid': 'logout-remove' });
   const ok = await confirmDialog({
     title: 'Abmelden?',
@@ -208,33 +205,39 @@ async function onLogout() {
     confirmText: 'Abmelden',
   });
   if (!ok) return;
-  let remove = connected && removeBox.checked;
-  if (connected) {
-    // Noch nicht hochgeladene Änderungen zuerst sichern.
-    const flushed = await flushCloudSync();
-    if (!flushed) {
-      const proceed = await confirmDialog({
-        title: 'Noch nicht in der Cloud gesichert',
-        message: remove
-          ? 'Ihre letzten Änderungen konnten nicht in die Cloud-Sicherung hochgeladen werden (keine Verbindung). Deshalb bleiben Ihre Daten auf diesem Gerät. Beim nächsten Anmelden hier werden sie gesichert.'
-          : 'Ihre letzten Änderungen konnten nicht in die Cloud-Sicherung hochgeladen werden (keine Verbindung). Sie bleiben in diesem Browser gespeichert und werden beim nächsten Anmelden hier gesichert.',
-        confirmText: 'Trotzdem abmelden',
-      });
-      if (!proceed) return;
-      remove = false;
+  loggingOut = true;
+  try {
+    let remove = connected && removeBox.checked;
+    if (code && isCloudConnected(code)) {
+      // Noch nicht hochgeladene Änderungen zuerst sichern.
+      toast('Ihr Stand wird noch gesichert …', 'info', 3000);
+      const flushed = await flushCloudSync();
+      if (!flushed) {
+        const proceed = await confirmDialog({
+          title: 'Noch nicht in der Cloud gesichert',
+          message: remove
+            ? 'Ihre letzten Änderungen konnten noch nicht in die Cloud-Sicherung hochgeladen werden. Deshalb bleiben Ihre Daten auf diesem Gerät. Beim nächsten Anmelden hier werden sie gesichert.'
+            : 'Ihre letzten Änderungen konnten noch nicht in die Cloud-Sicherung hochgeladen werden. Sie bleiben in diesem Browser gespeichert und werden beim nächsten Anmelden hier gesichert.',
+          confirmText: 'Trotzdem abmelden',
+        });
+        if (!proceed) return;
+        remove = false;
+      }
     }
-  }
-  stopCloudSync();
-  if (code) {
-    endCloudSession(code);
-    if (remove) {
-      deleteTeacherState(code);
-      forgetCloudOnDevice(code);
+    stopCloudSync();
+    if (code) {
+      endCloudSession(code);
+      if (remove) {
+        deleteTeacherState(code);
+        forgetCloudOnDevice(code);
+      }
     }
+    clearSession();
+    if (remove) toast('Ihre Daten wurden von diesem Gerät entfernt. Ihre Cloud-Sicherung bleibt erhalten.', 'success', 6000);
+    navigate('/');
+  } finally {
+    loggingOut = false;
   }
-  clearSession();
-  if (remove) toast('Ihre Daten wurden von diesem Gerät entfernt. Ihre Cloud-Sicherung bleibt erhalten.', 'success', 6000);
-  navigate('/');
 }
 
 function setTitle(title) {

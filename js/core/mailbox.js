@@ -145,13 +145,13 @@ const MAILBOX_MESSAGES = {
 
 /**
  * Anfrage an den Dienst (Briefkasten und Cloud-Sicherung). Wirft MailboxError mit verständlicher Meldung.
- * @param {{body?: object, secret?: string, messages?: object, unreachable?: string, timeout?: number, keepalive?: boolean}} [opts]
- *   messages: Meldungen je HTTP-Status, unreachable: Meldung ohne Verbindung,
+ * @param {{body?: object, secret?: string, headers?: object, messages?: object, unreachable?: string, timeout?: number, keepalive?: boolean}} [opts]
+ *   headers: weitere Kopfzeilen, messages: Meldungen je HTTP-Status, unreachable: Meldung ohne Verbindung,
  *   keepalive: Anfrage darf das Schließen der Seite überdauern (nur für kleine Anfragen bis 64 KB)
  */
-export async function serviceRequest(method, path, { body, secret, messages = MAILBOX_MESSAGES, unreachable = UNREACHABLE, timeout = TIMEOUT_MS, keepalive = false } = {}) {
+export async function serviceRequest(method, path, { body, secret, headers: extraHeaders = {}, messages = MAILBOX_MESSAGES, unreachable = UNREACHABLE, timeout = TIMEOUT_MS, keepalive = false } = {}) {
   if (!MAILBOX_URL) throw new MailboxError('Der digitale Briefkasten ist nicht eingerichtet.', { offline: true });
-  const headers = {};
+  const headers = { ...extraHeaders };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (secret) headers.Authorization = `Bearer ${secret}`;
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;

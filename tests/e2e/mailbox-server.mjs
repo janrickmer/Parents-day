@@ -45,7 +45,7 @@ export class FakeD1 {
     this.db.exec('BEGIN');
     try {
       // synchron – so kann keine andere Anfrage mitten in die Transaktion geraten
-      for (const st of statements) results.push(/^\s*select/i.test(st.sql) ? st.allSync() : st.runSync());
+      for (const st of statements) results.push(/^\s*select|\breturning\b/i.test(st.sql) ? st.allSync() : st.runSync());
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');

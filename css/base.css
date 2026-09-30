@@ -735,6 +735,13 @@ textarea[aria-invalid='true'] {
   flex-wrap: wrap;
   margin-top: 20px;
 }
+/* Schmale Bildschirme: Knöpfe untereinander und in voller Breite – lange Beschriftungen werden nicht abgeschnitten */
+@media (max-width: 520px) {
+  .modal-actions .btn {
+    width: 100%;
+    white-space: normal;
+  }
+}
 
 .toast-host {
   position: fixed;

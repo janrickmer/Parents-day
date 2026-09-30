@@ -73,11 +73,15 @@ function cloudSection() {
     h(
       'ul',
       {},
-      h('li', {}, 'Der komplette Stand der Lehrkraft (Elternsprechtag, Klassen, Namen der Lernenden, Rückmeldungen, Termine, Schlüssel des Briefkastens) wird im Browser mit ihrem Passwort verschlüsselt (AES-256-GCM, Schlüssel aus dem Passwort mit PBKDF2) und so beim Dienst bei Cloudflare abgelegt.'),
-      h('li', {}, 'Das Passwort verlässt den Browser nie. Der Dienst und Cloudflare können die Sicherung nicht lesen. Ohne das Passwort lässt sie sich nicht entschlüsseln – auch nicht von ParentsDay.'),
-      h('li', {}, 'Zur Zuordnung dient eine Kennung, die aus Namen und Geburtsdatum der Lehrkraft berechnet wird (ein Hashwert, nicht die Angaben selbst). Nach 10 falschen Passwörtern innerhalb einer Stunde wird der Zugang für den Rest der Stunde gesperrt.'),
+      h('li', {}, 'Der komplette Stand der Lehrkraft (Elternsprechtag, Klassen, Namen der Lernenden, Rückmeldungen, Termine, Schlüssel des Briefkastens) wird im Browser mit ihrem Passwort verschlüsselt (AES-256-GCM; Schlüssel aus dem Passwort mit PBKDF2 und HKDF) und so beim Dienst bei Cloudflare abgelegt.'),
+      h('li', {}, 'Das Passwort verlässt den Browser nie. Auch die Adresse der Sicherung beim Dienst wird aus dem Passwort berechnet: Ohne das Passwort lässt sich die Sicherung weder finden noch lesen, überschreiben oder löschen – auch nicht von ParentsDay.'),
+      h(
+        'li',
+        {},
+        'Um das Ausprobieren von Passwörtern zu verhindern, zählt der Dienst Versuche, eine Sicherung zu öffnen – je Lehrkraft (anhand eines Hashwerts aus Name und Geburtsdatum) und Internetanschluss. Statt der IP-Adresse speichert er dafür einen Hashwert mit täglich wechselndem Zufallswert, der sich nicht auf die Adresse zurückführen lässt; diese Zähler werden nach zwei Tagen gelöscht.',
+      ),
       h('li', {}, 'Die Lehrkraft kann die Cloud-Sicherung jederzeit unter „Weitere Einstellungen“ löschen. Wird sie 400 Tage weder geändert noch abgerufen, wird sie automatisch gelöscht.'),
-      h('li', {}, 'Ist das Passwort auf einem Gerät gemerkt, liegt der daraus berechnete Schlüssel im Speicher dieses Browsers – wie der Stand selbst auch.'),
+      h('li', {}, 'Ist das Passwort auf einem Gerät gemerkt, liegen die daraus berechneten Schlüssel im Speicher dieses Browsers – wie der Stand selbst auch. Zum Ändern des Passworts und zum Löschen der Sicherung ist immer das Passwort nötig.'),
     ),
   );
 }
