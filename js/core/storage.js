@@ -101,6 +101,11 @@ export function saveTeacherState(state) {
   return state;
 }
 
+/** Löscht alle Daten einer Lehrkraft aus diesem Browser. */
+export function deleteTeacherState(teacherCode) {
+  storageRemove(localStorage, TEACHER_PREFIX + teacherCode);
+}
+
 /** Beobachter für Änderungen am Zustand. Gibt eine Abmelde-Funktion zurück. */
 export function onStateChange(fn) {
   listeners.add(fn);
