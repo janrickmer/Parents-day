@@ -129,8 +129,28 @@ function teacherHeader(state) {
         h(
           'div',
           { class: 'header-actions' },
-          h('button', { type: 'button', class: 'btn btn-small btn-secondary', onclick: saveBackupNow, 'data-action': 'backup-save' }, 'Zwischenstand speichern'),
-          h('button', { type: 'button', class: 'btn btn-small btn-secondary', onclick: () => openLoadBackupDialog({ navigate }), 'data-action': 'backup-load' }, 'Zwischenstand laden'),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'btn btn-small btn-secondary',
+              onclick: saveBackupNow,
+              'data-action': 'backup-save',
+              title: 'Alles wird automatisch in diesem Browser gespeichert. Die Datei brauchen Sie für ein anderes Gerät oder falls die Browserdaten gelöscht werden.',
+            },
+            'Zwischenstand speichern',
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'btn btn-small btn-secondary',
+              onclick: () => openLoadBackupDialog({ navigate }),
+              'data-action': 'backup-load',
+              title: 'Einen gespeicherten Zwischenstand öffnen, z. B. auf einem anderen Gerät',
+            },
+            'Zwischenstand laden',
+          ),
           h('button', { type: 'button', class: 'btn btn-small btn-ghost', onclick: onLogout }, 'Abmelden'),
         ),
       ),

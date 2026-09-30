@@ -167,6 +167,8 @@ export function teacherStorageKey(teacherCode) {
  */
 export function deleteTeacherState(teacherCode) {
   storageRemove(localStorage, TEACHER_PREFIX + teacherCode);
+  storageRemove(localStorage, DRAFT_PREFIX + teacherCode);
+  storageRemove(sessionStorage, DRAFT_PREFIX + teacherCode);
   try {
     const keys = [];
     for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
@@ -377,7 +379,8 @@ function normalizeMailbox(mb) {
 }
 
 // --- Noch nicht gespeicherte Eingaben auf „Elternsprechtag erstellen“ / „Weitere Einstellungen“ ---
-// Sie liegen bis zum Absenden nur in diesem Tab (sessionStorage) und kommen mit in den Zwischenspeicher.
+// Sie werden bei jeder Eingabe im Browser gespeichert (localStorage) – auch nach dem Schließen des Browsers
+// und beim nächsten Einloggen sind sie wieder da – und kommen mit in den Zwischenspeicher.
 // `base` ist der gespeicherte Stand, auf dem der Entwurf beruht – passt er nicht mehr, gilt der Entwurf nicht.
 
 const draftListeners = new Set();
@@ -391,7 +394,7 @@ export function eventDraftBase(state) {
 /** Rohdaten des Entwurfs der angemeldeten Lehrkraft, wenn er zum Stand `state` passt (sonst null). */
 export function loadEventDraft(state) {
   try {
-    const data = JSON.parse(storageGet(sessionStorage, DRAFT_PREFIX + state.teacher.teacherCode) || 'null');
+    const data = JSON.parse(storageGet(localStorage, DRAFT_PREFIX + state.teacher.teacherCode) || 'null');
     if (!data || data.base !== eventDraftBase(state) || !isObject(data.draft) || !Array.isArray(data.draft.days)) return null;
     return data.draft;
   } catch {
@@ -401,14 +404,15 @@ export function loadEventDraft(state) {
 
 export function storeEventDraft(state, draft) {
   try {
-    storageSet(sessionStorage, DRAFT_PREFIX + state.teacher.teacherCode, JSON.stringify({ base: eventDraftBase(state), draft }));
+    storageSet(localStorage, DRAFT_PREFIX + state.teacher.teacherCode, JSON.stringify({ base: eventDraftBase(state), draft }));
   } catch {
     // Speicher nicht verfügbar – dann gehen ungespeicherte Eingaben beim Neuladen verloren.
   }
 }
 
 export function clearEventDraft(state) {
-  storageRemove(sessionStorage, DRAFT_PREFIX + state.teacher.teacherCode);
+  storageRemove(localStorage, DRAFT_PREFIX + state.teacher.teacherCode);
+  storageRemove(sessionStorage, DRAFT_PREFIX + state.teacher.teacherCode); // Entwürfe älterer Fassungen
 }
 
 /** Meldet, ob auf der aktuellen Seite ungespeicherte Eingaben stehen (für die Anzeige in der Kopfzeile). */

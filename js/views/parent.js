@@ -1317,9 +1317,9 @@ function renderDone(ctx) {
 
   const onLogout = async () => {
     const ok = await confirmDialog({
-      title: 'Fertig und abmelden?',
+      title: 'Beenden und ausloggen?',
       message: 'Ihre markierten Zeiten werden aus diesem Browser gelöscht. Bitte schicken Sie die PDF-Datei vorher per E-Mail an die Lehrkraft.',
-      confirmText: 'Ja, abmelden',
+      confirmText: 'Ja, ausloggen',
       cancelText: 'Zurück',
     });
     if (!ok) return;
@@ -1375,7 +1375,7 @@ function renderDone(ctx) {
         'div',
         { class: 'parent-actions parent-done-links' },
         h('a', { class: 'btn btn-secondary', href: '#/eltern/zeiten' }, 'Zeiten ändern'),
-        h('button', { type: 'button', class: 'btn btn-ghost', 'data-testid': 'parent-logout', onclick: onLogout }, 'Fertig – abmelden'),
+        h('button', { type: 'button', class: 'btn btn-secondary parent-logout-btn', 'data-testid': 'parent-logout', onclick: onLogout }, 'Beenden und ausloggen'),
       ),
     ),
   );
@@ -1418,11 +1418,11 @@ function renderSent(ctx, ps) {
 
   const onLogout = async () => {
     const ok = await confirmDialog({
-      title: 'Fertig und abmelden?',
+      title: 'Beenden und ausloggen?',
       message: changedSince
         ? 'Ihre Änderungen nach dem Absenden sind noch nicht bei der Lehrkraft. Wenn Sie sich jetzt abmelden, werden sie aus diesem Browser gelöscht.'
         : `Ihre Rückmeldung ist bei ${teacherDat(event)} angekommen. Ihre markierten Zeiten werden nur aus diesem Browser gelöscht.`,
-      confirmText: 'Ja, abmelden',
+      confirmText: 'Ja, ausloggen',
       cancelText: 'Zurück',
     });
     if (!ok) return;
@@ -1459,6 +1459,12 @@ function renderSent(ctx, ps) {
         timesList(event, payload),
         h('p', { class: 'muted small' }, `Ihre Angaben wurden verschlüsselt übermittelt. Nur ${teacherAcc(event)} kann sie lesen.`),
         h('div', { class: 'parent-actions' }, downloadBtn),
+        h(
+          'p',
+          { class: 'muted small parent-receipt-note', 'data-testid': 'parent-receipt-note' },
+          'Der Beleg dient nur als Ihr eigener Nachweis und muss nirgendwo eingereicht werden.',
+          changedSince ? null : ' Alle nötigen Informationen wurden der Lehrkraft bereits übermittelt.',
+        ),
       ),
       h(
         'section',
@@ -1467,7 +1473,11 @@ function renderSent(ctx, ps) {
         h('p', {}, 'Klicken Sie auf „Zeiten ändern“ und danach erneut auf „Absenden“. Bei der Lehrkraft gilt immer Ihre zuletzt gesendete Rückmeldung.'),
         h('div', { class: 'parent-actions' }, h('a', { class: 'btn btn-secondary', href: '#/eltern/zeiten' }, 'Zeiten ändern')),
       ),
-      h('div', { class: 'parent-actions parent-done-links' }, h('button', { type: 'button', class: 'btn btn-ghost', 'data-testid': 'parent-logout', onclick: onLogout }, 'Fertig – abmelden')),
+      h(
+        'div',
+        { class: 'parent-actions parent-sent-finish' },
+        h('button', { type: 'button', class: 'btn btn-primary btn-large parent-logout-btn', 'data-testid': 'parent-logout', onclick: onLogout }, 'Beenden und ausloggen'),
+      ),
     ),
   );
 }

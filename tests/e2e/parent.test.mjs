@@ -376,9 +376,10 @@ test('Eltern (Desktop): ohne Link mit Termin-Schlüssel anmelden, Ziehen mit der
     await page.waitForSelector(tid('parent-teacher-email'));
     assert.equal(await page.inputValue(tid('parent-teacher-email')), 'lehrer@example.org');
 
-    // Fertig – abmelden löscht alles
+    // „Beenden und ausloggen“ löscht alles
+    assert.equal((await page.textContent(tid('parent-logout'))).trim(), 'Beenden und ausloggen');
     await page.click(tid('parent-logout'));
-    await page.locator('.modal').getByRole('button', { name: 'Ja, abmelden' }).click();
+    await page.locator('.modal').getByRole('button', { name: 'Ja, ausloggen' }).click();
     await waitForHash(page, '#/');
     assert.equal(await parentState(page), null);
 

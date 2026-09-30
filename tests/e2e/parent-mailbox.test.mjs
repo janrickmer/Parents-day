@@ -209,11 +209,18 @@ test('Eltern (Smartphone): QR-Link mit Briefkasten → Absenden → Rückmeldung
     assert.deepEqual(latest.availability['2026-11-12'], [['14:00', '14:40']]);
     assert.ok(Date.parse(latest.submittedAt) > Date.parse(payload.submittedAt), 'neuere Rückmeldung');
 
-    // Fertig – abmelden
+    // Beleg-Hinweis und deutlich hervorgehobener Knopf „Beenden und ausloggen“
+    await page.goto(`${env.web.url}#/eltern/fertig`);
+    await page.locator(tid('parent-sent-ok')).waitFor();
+    const note = await page.textContent(tid('parent-receipt-note'));
+    assert.match(note, /nur als Ihr eigener Nachweis und muss nirgendwo eingereicht werden/);
+    const logout = page.locator(tid('parent-logout'));
+    assert.equal((await logout.textContent()).trim(), 'Beenden und ausloggen');
+    assert.match(await logout.getAttribute('class'), /\bbtn-primary\b/);
     await page.tap(tid('parent-logout'));
     const dialog = page.locator('.modal');
     assert.match(await dialog.textContent(), /angekommen/);
-    await dialog.getByRole('button', { name: 'Ja, abmelden' }).tap();
+    await dialog.getByRole('button', { name: 'Ja, ausloggen' }).tap();
     await waitForHash(page, '#/');
     assert.equal(await parentState(page), null);
     assert.equal(downloads, 1, 'nur der Beleg wurde heruntergeladen');

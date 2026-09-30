@@ -131,7 +131,11 @@
   margin-top: 22px;
 }
 .resp-email > .resp-section-title {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
+}
+.resp-email-note {
+  margin: 0 0 12px;
+  max-width: 72ch;
 }
 
 @media (max-width: 520px) {

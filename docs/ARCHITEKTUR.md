@@ -95,7 +95,7 @@ Jede View ist ein ES-Modul: `export default async function render(ctx)`, optiona
 * `state` – bei Lehrkraft-Routen der aktuelle TeacherState (Kopie aus localStorage), sonst `null`
 * Änderungen immer über `updateState(s => { … })` aus `core/storage.js` speichern (speichert sofort in localStorage, aktualisiert die „Automatisch gespeichert“-Anzeige). Danach bei Bedarf neu zeichnen oder `ctx.rerender()` aufrufen.
 * Kann der Browser nicht speichern (Speicher voll oder gesperrt), wirft `updateState()` bzw. `saveTeacherState()` einen Fehler mit der Meldung `STORAGE_FULL`. Die Anzeige „Automatisch gespeichert“ wird dann nicht aktualisiert. Aufrufer zeigen die Meldung an und dürfen keinen Erfolg melden.
-* Ungespeicherte Eingaben auf „Elternsprechtag erstellen“ bzw. „Weitere Einstellungen“ liegen als Entwurf im sessionStorage (`storeEventDraft()`). Solange es sie gibt, zeigt die Kopfzeile „noch nicht gespeichert“ (`setDraftPending()`).
+* Ungespeicherte Eingaben auf „Elternsprechtag erstellen“ bzw. „Weitere Einstellungen“ liegen als Entwurf im localStorage (`storeEventDraft()`) und sind auch nach dem Schließen des Browsers bzw. beim nächsten Einloggen wieder da. Solange es sie gibt, zeigt die Kopfzeile „noch nicht gespeichert“ (`setDraftPending()`).
 
 | Hash-Route | View | params |
 |---|---|---|

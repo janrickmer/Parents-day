@@ -437,6 +437,13 @@ export function createResponseImporter({ classId, onImported } = {}) {
           'section',
           { class: 'resp-email', 'aria-labelledby': 'resp-email-title' },
           h('h3', { id: 'resp-email-title', class: 'resp-section-title' }, 'Rückmeldungen per E-Mail (PDF oder Text)'),
+          h(
+            'p',
+            { class: 'muted small resp-email-note', 'data-testid': 'response-email-note' },
+            'Normalerweise werden die Rückmeldungen der Eltern automatisch in die Übersicht eingepflegt – Sie müssen dafür nichts tun. ',
+            'In seltenen Fällen haben Eltern technische Probleme und schicken Ihnen deshalb den „Beleg“ mit ihren verfügbaren Uhrzeiten als PDF-Datei per E-Mail. ',
+            'Laden Sie diese Datei dann einfach hier hoch: Die Angaben werden automatisch bei der Schülerin bzw. dem Schüler eingetragen.',
+          ),
           zone,
           pasteRow,
           report,

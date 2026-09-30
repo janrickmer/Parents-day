@@ -236,6 +236,11 @@ test('Elternschreiben legt den Briefkasten an; Rückmeldungen kommen automatisch
     assert.equal(await page.locator(tid('mailbox-fetch')).count(), 0);
     assert.match(await page.textContent('.tc-responses'), /Rückmeldungen kommen automatisch über den digitalen Briefkasten; Rückmeldungen per E-Mail können Sie weiterhin hier hochladen\./);
     assert.match(await page.textContent('.tc-responses'), /Rückmeldungen per E-Mail \(PDF oder Text\)/);
+    // Erklärung in kleiner Schrift: normalerweise automatisch, Beleg-PDF nur bei technischen Problemen
+    const emailNote = await page.textContent(tid('response-email-note'));
+    assert.match(emailNote, /Normalerweise werden die Rückmeldungen der Eltern automatisch in die Übersicht eingepflegt/);
+    assert.match(emailNote, /„Beleg“ mit ihren verfügbaren Uhrzeiten als PDF-Datei per E-Mail/);
+    assert.ok(await page.locator(`${tid('response-email-note')}.small`).count(), 'kleine Schrift');
     assert.ok(!(await readState(page)).mailbox, 'noch kein Briefkasten');
     await shot(page, 'desktop-1-klasse-vor-briefen');
 

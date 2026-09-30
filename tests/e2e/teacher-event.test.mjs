@@ -336,7 +336,7 @@ test('Smartphone (390 px): keine waagerechte Scrollleiste, Kalender bedienbar', 
 // ---------- Ergänzungen aus der Prüfung ----------
 
 const DRAFT_KEY = `parentsday.eventDraft.${SAMPLE_TEACHER.teacherCode}`;
-const readDraft = (page) => page.evaluate((k) => sessionStorage.getItem(k), DRAFT_KEY);
+const readDraft = (page) => page.evaluate((k) => localStorage.getItem(k), DRAFT_KEY);
 
 test('Kalender: vergangene Tage gesperrt, heute markiert, Tastatur wechselt den Monat', async () => {
   const { browser, page, errors } = await launch();
@@ -641,7 +641,7 @@ test('Zwischenstand enthält ungespeicherte Eingaben zum Elternsprechtag und ste
     assert.equal(saved.eventDraft.address, 'Neue Schule\nWeg 2\n54321 Neustadt');
 
     // Anderes Gerät: Entwurf ist weg, Zwischenstand laden stellt ihn wieder her
-    await page.evaluate(() => sessionStorage.removeItem('parentsday.eventDraft.A16595316960M'));
+    await page.evaluate(() => localStorage.removeItem('parentsday.eventDraft.A16595316960M'));
     await page.goto(`${server.url}#/lehrkraft/klassen`);
     await page.waitForURL(/#\/lehrkraft\/elternsprechtag$/);
     await page.click('[data-action="backup-load"]');
@@ -668,6 +668,35 @@ test('Zwischenstand enthält ungespeicherte Eingaben zum Elternsprechtag und ste
     await page.waitForURL(/#\/lehrkraft\/klassen$/);
     await page.waitForSelector(tid('class-create'));
     assert.match(await page.textContent(tid('save-indicator')), /^Automatisch gespeichert/);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Nicht gespeicherte Eingaben bleiben auch in einem neuen Tab bzw. nach erneutem Einloggen erhalten', async () => {
+  const { browser, context, page, errors } = await launch();
+  try {
+    await seedTeacher(page, server.url, sampleState({ event: null }));
+    await page.goto(`${server.url}#/lehrkraft/elternsprechtag`);
+    await page.fill(tid('event-address'), 'Grundschule Am Park\nParkweg 3\n12345 Musterstadt');
+    await page.fill(tid('event-slot'), '15');
+    await page.waitForTimeout(300);
+    await page.close();
+
+    // Neuer Tab (eigene Sitzung): erneut anmelden, die Eingaben sind wieder da
+    const again = await context.newPage();
+    again.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
+    await again.goto(server.url);
+    await again.evaluate((code) => sessionStorage.setItem('parentsday.session', code), SAMPLE_TEACHER.teacherCode);
+    await again.goto(`${server.url}#/lehrkraft/elternsprechtag`);
+    await again.locator('.toast', { hasText: 'wiederhergestellt' }).waitFor();
+    assert.equal(await again.inputValue(tid('event-address')), 'Grundschule Am Park\nParkweg 3\n12345 Musterstadt');
+    assert.equal(await again.inputValue(tid('event-slot')), '15');
+
+    // „Alle Daten löschen“ entfernt auch den Entwurf
+    await again.evaluate(async (code) => (await import('./js/core/storage.js')).deleteTeacherState(code), SAMPLE_TEACHER.teacherCode);
+    assert.equal(await again.evaluate((code) => localStorage.getItem(`parentsday.eventDraft.${code}`), SAMPLE_TEACHER.teacherCode), null);
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

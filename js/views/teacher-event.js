@@ -35,9 +35,9 @@ function draftFromState(state) {
 }
 
 // ---------- Ungespeicherte Eingaben (bleiben bei Neuladen/Seitenwechsel im Tab erhalten) ----------
-// Sie liegen im sessionStorage (core/storage.js) und kommen auch in den Zwischenspeicher.
+// Sie liegen im localStorage (core/storage.js) und kommen auch in den Zwischenspeicher.
 
-/** Liest einen noch nicht gespeicherten Entwurf dieses Tabs (oder null). */
+/** Liest einen noch nicht gespeicherten Entwurf (oder null). */
 function loadStoredDraft(state) {
   try {
     const d = loadEventDraft(state);

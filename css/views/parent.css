@@ -503,3 +503,19 @@
     font-size: 1.25rem;
   }
 }
+
+/* ---------- Beenden und ausloggen ---------- */
+
+.parent-sent-finish {
+  justify-content: center;
+  margin-top: 8px;
+}
+.parent-sent-finish .parent-logout-btn {
+  min-width: 280px;
+}
+@media (max-width: 480px) {
+  .parent-sent-finish .parent-logout-btn {
+    min-width: 0;
+    width: 100%;
+  }
+}
