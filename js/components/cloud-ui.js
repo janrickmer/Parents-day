@@ -18,6 +18,9 @@ import {
   unlockCloud,
   unlockDecision,
   adoptCloud,
+  restoreCloudKeys,
+  deviceCloudKeys,
+  openWithKeys,
   changeCloudPassword,
   moveCloudToNewPassword,
   deleteCloud,
@@ -132,14 +135,14 @@ export function newPasswordFields(prefix, { label = 'Passwort für die Cloud-Sic
   };
 }
 
-/** Kästchen „Passwort auf diesem Gerät merken“. */
-export function rememberCheckbox(prefix, { checked = true } = {}) {
+/** Kästchen „Passwort auf diesem Gerät merken“ (hint: Erklärung darunter). */
+export function rememberCheckbox(prefix, { checked = true, hint = 'Dann bleibt dieses Gerät auch nach dem Abmelden mit Ihrer Cloud-Sicherung verbunden. Nicht an fremden oder gemeinsam genutzten Computern.' } = {}) {
   const input = h('input', { type: 'checkbox', id: `${prefix}-remember`, 'data-testid': `${prefix}-remember`, checked });
   const wrap = h(
     'div',
     { class: 'cloud-remember' },
     h('label', { class: 'checkbox-label', for: input.id }, input, ' Passwort auf diesem Gerät merken'),
-    h('div', { class: 'field-hint' }, 'Dann müssen Sie es hier nicht noch einmal eingeben. Nicht an fremden oder gemeinsam genutzten Computern.'),
+    h('div', { class: 'field-hint' }, hint),
   );
   return { wrap, input };
 }
@@ -320,7 +323,7 @@ export function openSetupDialog({ teacher, allowLater = false, intro = '', offer
       h(
         'p',
         {},
-        'Mit der Cloud-Sicherung ist Ihr aktueller Stand auf jedem Gerät da, an dem Sie sich anmelden – ohne Zwischenspeicher-Datei. Ihre Daten werden dafür schon in Ihrem Browser mit Ihrem Passwort verschlüsselt. Niemand sonst kann sie lesen.',
+        'Mit der Cloud-Sicherung ist Ihr aktueller Stand auf jedem Gerät da, an dem Sie sich anmelden – ohne Zwischenspeicher-Datei. Ihre Daten werden dafür schon in Ihrem Browser mit Ihrem Passwort verschlüsselt. Niemand sonst kann sie lesen. Mit diesem Passwort können Sie sich künftig auch anmelden.',
       ),
       alertBox('warning', h('p', {}, h('strong', {}, 'Merken Sie sich das Passwort gut. '), 'Es wird nirgends gespeichert. Ohne das Passwort lässt sich die Cloud-Sicherung nicht öffnen – auch nicht von ParentsDay.')),
       pw.wraps,
@@ -374,6 +377,10 @@ async function adoptAfterUnlock(teacher, unlocked, remember) {
   return choice;
 }
 
+function announceUnlock(choice) {
+  toast(choice === 'remote' ? 'Ihr Stand aus der Cloud-Sicherung wurde geladen.' : 'Die Cloud-Sicherung ist verbunden. Der Stand von diesem Gerät wird gesichert.', 'success', 6000);
+}
+
 /**
  * Dialog „Passwort eingeben“: öffnet die Cloud-Sicherung auf diesem Gerät.
  * @param {{teacher:object, message?:string, allowSkip?:boolean, offerSetup?:boolean}} opts
@@ -425,6 +432,16 @@ export function openUnlockDialog({ teacher, message = '', allowSkip = false, off
         pw.input.focus();
         return;
       }
+      // Sicherung noch nicht angelegt (z. B. ohne Verbindung registriert): Passt das Passwort zu diesem Gerät, wird es
+      // ohne Dienst verbunden – angelegt wird sie beim Abgleich.
+      const local = loadCloudConfig(teacher.teacherCode)?.pendingCreate ? await deviceCloudKeys(teacher, password) : null;
+      if (local) {
+        restoreCloudKeys(teacher.teacherCode, local, remember.input.checked);
+        syncCloudNow();
+        announceUnlock('local');
+        close('unlocked');
+        return;
+      }
       let unlocked;
       try {
         unlocked = await unlockCloud(teacher, password);
@@ -440,8 +457,7 @@ export function openUnlockDialog({ teacher, message = '', allowSkip = false, off
         }
         throw err;
       }
-      const choice = await adoptAfterUnlock(teacher, unlocked, remember.input.checked);
-      toast(choice === 'remote' ? 'Ihr Stand aus der Cloud-Sicherung wurde geladen.' : 'Die Cloud-Sicherung ist verbunden. Der Stand von diesem Gerät wird gesichert.', 'success', 6000);
+      announceUnlock(await adoptAfterUnlock(teacher, unlocked, remember.input.checked));
       close('unlocked');
     },
   });
@@ -524,7 +540,7 @@ function openMoveDialog(teacher) {
     submitTestId: 'cloud-move-submit',
     busyLabel: 'Wird umgestellt …',
     buttons: [{ label: 'Abbrechen', value: undefined }],
-    body: h('div', { class: 'stack-small' }, h('p', {}, 'Ihr aktueller Stand wird mit dem neuen Passwort gesichert. Auf Ihren anderen Geräten geben Sie danach einmal das neue Passwort ein.'), pw.wraps),
+    body: h('div', { class: 'stack-small' }, h('p', {}, 'Ihr aktueller Stand wird mit dem neuen Passwort gesichert. Auf Ihren anderen Geräten geben Sie danach einmal das neue Passwort ein. Zum Anmelden mit Passwort gilt ab sofort das neue.'), pw.wraps),
     onSubmit: async ({ close }) => {
       const password = pw.check();
       if (!password) return;
@@ -551,7 +567,7 @@ export function openChangePasswordDialog(teacher) {
     body: h(
       'div',
       { class: 'stack-small' },
-      h('p', {}, 'Ihr Stand wird mit dem neuen Passwort neu verschlüsselt. Auf Ihren anderen Geräten geben Sie danach einmal das neue Passwort ein.'),
+      h('p', {}, 'Ihr Stand wird mit dem neuen Passwort neu verschlüsselt. Auf Ihren anderen Geräten geben Sie danach einmal das neue Passwort ein. Zum Anmelden mit Passwort gilt ab sofort das neue.'),
       current.wrap,
       h(
         'p',
@@ -602,7 +618,7 @@ export function openDeleteCloudDialog(teacher) {
       'div',
       { class: 'stack-small' },
       h('p', {}, 'Ihre Cloud-Sicherung wird vom Server gelöscht. Der Stand in diesem Browser bleibt erhalten.'),
-      h('p', {}, 'Auf anderen Geräten bleibt der dort gespeicherte Stand ebenfalls erhalten, wird aber nicht mehr abgeglichen – dort erscheint einmal „Passwort nötig“; mit „Cloud-Sicherung auf diesem Gerät nicht mehr verwenden“ lösen Sie das Gerät. Zum Weiterarbeiten an einem anderen Gerät brauchen Sie dann wieder eine Zwischenspeicher-Datei.'),
+      h('p', {}, 'Auf anderen Geräten bleibt der dort gespeicherte Stand ebenfalls erhalten, wird aber nicht mehr abgeglichen – dort erscheint „Passwort nötig“ bzw. nach der Anmeldung „Passwort eingeben“; mit „Cloud-Sicherung auf diesem Gerät nicht mehr verwenden“ lösen Sie das Gerät. Zum Weiterarbeiten an einem anderen Gerät brauchen Sie dann wieder eine Zwischenspeicher-Datei; an neuen Geräten melden Sie sich mit Ihrer Registrierungs-PDF oder Ihrem Registrierungscode an.'),
       pw.wrap,
     ),
     onSubmit: async ({ close }) => {
@@ -647,10 +663,12 @@ function sameSaved(a, b) {
  * Passwort (neues bzw. leeres Gerät) oder bietet an, die Cloud-Sicherung einzurichten (Gerät mit Daten).
  * Der Stand der Lehrkraft muss schon in diesem Browser gespeichert und die Sitzung gesetzt sein.
  * @param {object} teacher
- * @param {{onProgress?: (text: string) => void}} [opts]
+ * @param {{onProgress?: (text: string) => void, keys?: object}} [opts] – keys: Schlüssel zum eben eingegebenen
+ *   Passwort; lehnt der Dienst dieses Gerät ab (z. B. aus der Geräteliste gefallen), wird es damit wieder eingetragen
+ *   statt erneut nach dem Passwort zu fragen
  * @returns {Promise<{restored: boolean}>} restored: Stand aus der Cloud übernommen
  */
-export async function cloudAfterLogin(teacher, { onProgress = () => {} } = {}) {
+export async function cloudAfterLogin(teacher, { onProgress = () => {}, keys = null } = {}) {
   if (!cloudEnabled()) return { restored: false };
   const code = teacher.teacherCode;
   startCloudSync(code, { sync: false });
@@ -666,7 +684,9 @@ export async function cloudAfterLogin(teacher, { onProgress = () => {} } = {}) {
     }
     onProgress('');
     const status = getCloudStatus(code);
-    if (status.kind === 'needs-password') await openUnlockDialog({ teacher, message: status.message, allowSkip: true });
+    if (status.kind === 'needs-password' && !(keys && (await reconnectDevice(teacher, keys)))) {
+      await openUnlockDialog({ teacher, message: status.message, allowSkip: true });
+    }
     return { restored: changed() };
   }
   onProgress('Cloud-Sicherung wird geprüft …');
@@ -699,34 +719,104 @@ export async function cloudAfterLogin(teacher, { onProgress = () => {} } = {}) {
 }
 
 /**
+ * Cloud-Sicherung nach der Anmeldung mit Passwort (checkLoginPassword war erfolgreich): Gehörte das Passwort schon
+ * zur Cloud-Sicherung dieses Geräts, wird abgeglichen wie bei cloudAfterLogin; sonst wird der Stand aus der Cloud
+ * übernommen (bei zwei verschiedenen Ständen entscheidet die Lehrkraft). „Passwort merken“ bleibt, wie es auf diesem
+ * Gerät gewählt war (auf einem neuen Gerät: nicht merken). Der Stand der Lehrkraft muss schon in diesem Browser
+ * gespeichert und die Sitzung gesetzt sein.
+ * @param {{known: boolean, keys?: object, unlocked?: object}} login – Ergebnis von checkLoginPassword
+ * @param {{onProgress?: (text: string) => void}} [opts]
+ * @returns {Promise<{restored: boolean}>} restored: Stand aus der Cloud übernommen
+ */
+export async function cloudAfterPasswordLogin(teacher, login, { onProgress = () => {} } = {}) {
+  const code = teacher.teacherCode;
+  if (login.known) {
+    restoreCloudKeys(code, login.keys);
+    return cloudAfterLogin(teacher, { onProgress, keys: login.keys });
+  }
+  startCloudSync(code, { sync: false });
+  const before = loadTeacherState(code);
+  announceUnlock(await adoptAfterUnlock(teacher, login.unlocked, loadCloudConfig(code)?.remember ?? false));
+  return { restored: !sameSaved(before, loadTeacherState(code)) };
+}
+
+/**
  * Cloud-Sicherung bei der Registrierung mit dem gewählten Passwort einrichten. Gibt es mit diesem Passwort schon
  * eine (erneute Registrierung, z. B. an einem neuen Gerät), wird deren Stand geladen.
  * @param {{remember?: boolean, email?: string}} [opts] – email: bei der Registrierung eingegebene Adresse
- * @returns {Promise<'created'|'pending'|'restored'|'kept'|'moved'|'failed'>}
- *   pending: wird hochgeladen, sobald der Dienst erreichbar ist; kept: dieses Gerät war schon verbunden;
- *   moved: mit diesem Passwort gab es eine Sicherung, deren Passwort inzwischen geändert wurde; failed: gesperrt o. Ä.
+ * @returns {Promise<'created'|'pending'|'restored'|'kept'|'kept-other'|'moved'|'failed'>}
+ *   pending: wird hochgeladen, sobald der Dienst erreichbar ist; kept: dieses Gerät war schon mit dieser Sicherung
+ *   eingerichtet (jetzt verbunden); kept-other: dieses Gerät ist mit einer Sicherung zu einem anderen Passwort
+ *   eingerichtet – das eingegebene wird nicht übernommen; moved: die Sicherung hat inzwischen ein neues Passwort bzw.
+ *   wurde gelöscht; failed: gesperrt o. Ä.
  */
 export async function cloudAfterRegister(teacher, password, { remember = true, email = '' } = {}) {
   const code = teacher.teacherCode;
   startCloudSync(code, { sync: false });
-  if (isCloudConnected(code)) {
-    syncCloudNow();
-    return 'kept';
-  }
   const before = loadTeacherState(code);
-  const status = await setupCloud(teacher, password, { remember });
+  let result;
+  if (loadCloudConfig(code)) {
+    // Schon mit einer Sicherung eingerichtet: Dabei bleibt es.
+    result = await registerAgain(teacher, password, remember);
+  } else {
+    const status = await setupCloud(teacher, password, { remember });
+    if (status.kind === 'needs-password') result = 'moved';
+    else if (status.kind === 'locked' || status.kind === 'error') result = 'failed';
+    else result = ['ok', 'pending', 'syncing', 'conflict'].includes(status.kind) ? 'created' : 'pending';
+  }
   const after = loadTeacherState(code);
-  const restored = isEmptyTeacherState(before) && !isEmptyTeacherState(after);
+  if ((result === 'created' || result === 'pending') && isEmptyTeacherState(before) && !isEmptyTeacherState(after)) result = 'restored';
   // Stand aus der Cloud übernommen: die eben eingegebene E-Mail-Adresse gilt trotzdem.
-  if (restored && email && after.teacher.email !== email) {
+  if (result === 'restored' && email && after.teacher.email !== email) {
     updateState((s) => {
       s.teacher.email = email;
     });
   }
-  if (restored) return 'restored';
-  if (status.kind === 'needs-password') return 'moved';
-  if (status.kind === 'locked' || status.kind === 'error') return 'failed';
-  return ['ok', 'pending', 'syncing', 'conflict'].includes(status.kind) ? 'created' : 'pending';
+  return result;
+}
+
+/**
+ * Erneute Registrierung an einem Gerät, das schon mit einer Sicherung eingerichtet ist (auch einer noch nicht
+ * angelegten). Dabei entsteht keine weitere Sicherung und das Gerät wechselt zu keiner anderen – ob die bisherige
+ * gelöscht wurde, ein neues Passwort hat oder ein anderes Gerät sie inzwischen angelegt hat, ist hier nicht sicher zu
+ * unterscheiden.
+ *  • Gleiches Passwort: wieder verbinden (ohne Dienst, „Passwort merken“ wie eben gewählt) und abgleichen → 'kept'
+ *    (bzw. 'created'/'pending'/'failed', solange die Sicherung noch angelegt werden muss). Lehnt der Dienst das Gerät
+ *    ab, wird es mit dem Passwort wieder eingetragen; gibt es die Sicherung so nicht mehr → 'moved'.
+ *  • Anderes Passwort → 'kept-other' (verbundene Geräte gleichen vorher ab: Sicherung nicht mehr da → 'moved').
+ */
+async function registerAgain(teacher, password, remember) {
+  const code = teacher.teacherCode;
+  const pending = Boolean(loadCloudConfig(code)?.pendingCreate);
+  const keys = await deviceCloudKeys(teacher, password);
+  if (keys) restoreCloudKeys(code, keys, remember);
+  if (!isCloudConnected(code)) return 'kept-other';
+  try {
+    await withTimeout(syncCloudNow(), LOGIN_SYNC_TIMEOUT_MS);
+  } catch {
+    // läuft im Hintergrund weiter
+  }
+  const status = getCloudStatus(code);
+  if (status.kind === 'needs-password') return keys && (await reconnectDevice(teacher, keys, remember)) ? 'kept' : 'moved';
+  if (!keys) return 'kept-other';
+  if (!pending) return 'kept';
+  if (!loadCloudConfig(code)?.pendingCreate) return 'created';
+  return status.kind === 'locked' || status.kind === 'error' ? 'failed' : 'pending';
+}
+
+/**
+ * Der Dienst lehnt dieses Gerät ab, das Passwort stimmt aber (Schlüssel dazu): Die Sicherung öffnen – das trägt das
+ * Gerät wieder ein (z. B. war es aus der Liste der eingetragenen Geräte gefallen). true, wenn das Gerät danach
+ * verbunden ist; false, wenn es die Sicherung so nicht mehr gibt oder der Dienst nicht erreichbar ist.
+ */
+async function reconnectDevice(teacher, keys, remember = loadCloudConfig(teacher.teacherCode)?.remember ?? false) {
+  try {
+    await adoptAfterUnlock(teacher, await openWithKeys(keys), remember);
+    return true;
+  } catch (err) {
+    if (err instanceof CloudNotFoundError || err instanceof MailboxError) return false;
+    throw err;
+  }
 }
 
 // ---------- Kopfzeile ----------
@@ -854,7 +944,7 @@ export function cloudSettingsCard(teacher) {
       const [label] = INDICATOR[status.kind] || [''];
       mount(
         body,
-        h('p', {}, 'Ihr kompletter Stand wird nach jeder Änderung verschlüsselt gesichert. An einem anderen Gerät melden Sie sich einfach an und geben Ihr Passwort ein – dann ist alles da.'),
+        h('p', {}, 'Ihr kompletter Stand wird nach jeder Änderung verschlüsselt gesichert. An einem anderen Gerät melden Sie sich einfach mit Ihrem Passwort an – dann ist alles da.'),
         h(
           'dl',
           { class: 'evt-profile evt-mailbox-facts' },

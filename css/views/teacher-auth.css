@@ -13,6 +13,10 @@
 .tauth-page > .page-header {
   margin-bottom: 0;
 }
+/* [hidden] muss auch bei Bausteinen mit eigener display-Angabe (z. B. .field) gelten */
+.tauth-page [hidden] {
+  display: none !important;
+}
 
 /* Umschalter Registrieren | Anmelden */
 .tauth-switch {
@@ -141,6 +145,13 @@
 .tauth-code-input {
   font-family: var(--font-mono);
   letter-spacing: 0.04em;
+}
+/* Anmelden mit Daten: „Passwort merken“ und Links unter den Feldern */
+.tauth-form > .cloud-remember {
+  margin-top: 14px;
+}
+.tauth-login-links {
+  margin: 12px 0 0;
 }
 .tauth-alt {
   margin: 0;

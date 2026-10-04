@@ -8,62 +8,93 @@
 // verbundenen Gerät), Sicherung löschen, Gerät lösen („nicht mehr verwenden“), Abmelden mit „Daten entfernen“,
 // „Alle Daten in diesem Browser löschen“ (mit und ohne vollständigen Abgleich), erneute Registrierung, Dienst ohne
 // Cloud-Sicherung, Sperre nach 10 Versuchen, Geräte-Geheimnis je Browser, „Passwort merken“ wie bisher gewählt und
-// die Registrierungs-PDF (ohne Passwort).
+// die Registrierungs-PDF (ohne Passwort). Die Anmeldung mit dem Passwort selbst prüft cloud-login.test.mjs.
 // Am Ende Tests direkt am Dienst: Anlegen verrät nichts und zählt als Versuch, Grenzen je Anschluss, Gesamtgrenze
 // nach tatsächlicher Größe, Aufräumen, Meldung zur Sperre.
-// Datenbank des Dienstes: Tabelle backups mit id = base64url(SHA-256("cloud|" + who + "|" + syncId)) – weder who
-// noch syncId stehen darin; backup_chunks(backup_id, idx, data); cloud_limits(key, win, n); meta.
-// PBKDF2 mit 600 000 Durchläufen dauert im Browser etwa eine halbe Sekunde – daher großzügige Wartezeiten.
+// Gemeinsame Hilfen (Umgebung, Datenbank des Dienstes, Geräte) stehen in cloud-helpers.mjs.
 // Aufruf: node --test tests/e2e/cloud.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import zlib from 'node:zlib';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { startServer, launch, captureDownload, pdfPayload, sampleState, seedTeacher, SAMPLE_TEACHER } from './helpers.mjs';
+import { captureDownload, pdfPayload, sampleState, seedTeacher, SAMPLE_TEACHER } from './helpers.mjs';
 import { startMailboxServer } from './mailbox-server.mjs';
 import worker from '../../worker/briefkasten.js';
 import { deriveCloudKeys, decryptCloudData, hashOf, cloudErrorMessage } from '../../js/core/cloud.js';
 import { MailboxError } from '../../js/core/mailbox.js';
+import {
+  tid,
+  flat,
+  sleep,
+  T_CODE,
+  PASSWORD,
+  NEW_PASSWORD,
+  WRONG_PASSWORD,
+  NEW_EMAIL,
+  SLOW,
+  TEST_TIMEOUT,
+  DAY_MS,
+  STATUS,
+  OFFLINE,
+  NOT_FOUND_LOGIN,
+  NOT_FOUND_PLAIN,
+  MOVED_OLD_PASSWORD,
+  LOADED,
+  FROM_OTHER_DEVICE,
+  SETUP_DONE,
+  SETUP_INTRO,
+  NEEDS_PASSWORD,
+  MOVED,
+  LOGIN_CONFLICT,
+  SYNC_CONFLICT,
+  LOCKED,
+  keysFor,
+  setup,
+  assertClean,
+  waitUntil,
+  waitHash,
+  rows,
+  rowId,
+  cloudRows,
+  chunkRows,
+  cloudRow,
+  attempts,
+  waitVersion,
+  decryptStored,
+  waitContent,
+  readState,
+  readCloud,
+  keysOf,
+  allStorage,
+  teacherKeys,
+  classIds,
+  classOf,
+  indicator,
+  waitIndicator,
+  toastWith,
+  modalTitle,
+  syncNow,
+  seedWithoutSession,
+  fillLogin,
+  unlockWith,
+  wrongPassword,
+  lockedPassword,
+  fillNewPassword,
+  addClass,
+  tiles,
+  goSettings,
+  goClasses,
+  refocus,
+  deviceWithCloud,
+  deviceUnlocked,
+  logout,
+  register,
+} from './cloud-helpers.mjs';
 
-// Ohne UTF-8-Locale ersetzt Chromium unter Linux Dateinamen mit Umlauten durch „download“.
-if (!process.env.LC_ALL && !/utf-?8/i.test(process.env.LANG || '')) process.env.LANG = 'C.UTF-8';
-
-const tid = (id) => `[data-testid="${id}"]`;
-const flat = (text) => String(text || '').replace(/\s+/g, ' ').trim();
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const T_CODE = SAMPLE_TEACHER.teacherCode;
-// Nicht das Beispiel aus dem Hinweis unter dem Passwortfeld – sonst stünde es ohnehin auf der Seite.
-const PASSWORD = 'Blaue Tafel grün 2026';
-const NEW_PASSWORD = 'Mond Heft Radiergummi 9';
-const WRONG_PASSWORD = 'Falsches Passwort 123';
-const NEW_EMAIL = 'anna.neu@schule.example';
-const SLOW = { timeout: 60000 }; // Schlüsselableitung und Abgleich
-const TEST_TIMEOUT = 240000;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-// Erwartete Konsolenmeldungen von Chromium (Antworten des Dienstes mit Fehlerstatus bzw. ohne Verbindung)
-const STATUS = (...codes) => new RegExp(`^console: Failed to load resource: the server responded with a status of (${codes.join('|')}) `);
-const OFFLINE = /^console: Failed to load resource: net::ERR_(INTERNET_DISCONNECTED|FAILED)$/;
-
-// Meldungen der Oberfläche
-const NOT_FOUND = 'Mit diesem Passwort gibt es keine Cloud-Sicherung. Bitte prüfen Sie das Passwort, auch Groß- und Kleinschreibung';
-const NOT_FOUND_LOGIN = `${NOT_FOUND} – oder richten Sie eine neue Cloud-Sicherung ein.`;
-const NOT_FOUND_PLAIN = `${NOT_FOUND}.`;
-const MOVED_OLD_PASSWORD = 'Das Passwort dieser Cloud-Sicherung wurde inzwischen auf einem anderen Gerät geändert. Bitte geben Sie das neue Passwort ein.';
-const LOADED = 'Ihr Stand aus der Cloud-Sicherung wurde geladen.';
-const FROM_OTHER_DEVICE = 'Neuer Stand von einem anderen Gerät übernommen.';
-const SETUP_DONE = 'Cloud-Sicherung eingerichtet. Ihr Stand wird ab jetzt automatisch gesichert.';
-const SETUP_INTRO = 'Neu: Ihr Stand kann jetzt automatisch in der Cloud gesichert werden – dann ist er auf jedem Gerät da, an dem Sie sich anmelden. Legen Sie dafür einmal ein Passwort fest.';
-const NEEDS_PASSWORD = 'Bitte geben Sie Ihr Passwort für die Cloud-Sicherung erneut ein. Vielleicht wurde es auf einem anderen Gerät geändert oder die Sicherung gelöscht.';
-const MOVED = 'Das Passwort Ihrer Cloud-Sicherung wurde auf einem anderen Gerät geändert. Bitte geben Sie das neue Passwort ein – Ihre Änderungen auf diesem Gerät bleiben erhalten.';
-const LOGIN_CONFLICT = 'Auf diesem Gerät ist ein anderer Stand gespeichert als in Ihrer Cloud-Sicherung.';
-const SYNC_CONFLICT = 'Ihr Stand wurde auf einem anderen Gerät geändert, während hier noch nicht gesicherte Änderungen vorlagen.';
-const LOCKED =
-  /^Für Ihre Cloud-Sicherung gab es zu viele Versuche mit einem falschen Passwort \(nicht unbedingt von Ihnen\)\. Zum Schutz Ihrer Daten ist das Öffnen und Einrichten (für eine Minute|für \d+ Minuten|bis morgen) gesperrt\. Geräte, die schon verbunden sind, gleichen weiter ab\.$/;
 const DELETE_ALL_COMPLETE =
-  'Ihre Cloud-Sicherung bleibt erhalten: Melden Sie sich wieder an und geben Ihr Passwort ein, ist Ihr Stand wieder da. Möchten Sie auch sie löschen, nutzen Sie vorher oben „Cloud-Sicherung löschen“.';
+  'Ihre Cloud-Sicherung bleibt erhalten: Melden Sie sich wieder mit Ihrem Passwort an, ist Ihr Stand wieder da. Möchten Sie auch sie löschen, nutzen Sie vorher oben „Cloud-Sicherung löschen“.';
 const DELETE_ALL_INCOMPLETE =
   'Ihr aktueller Stand ist nicht vollständig in der Cloud-Sicherung (keine Verbindung oder Passwort nicht eingegeben). Was hier seit dem letzten Abgleich geändert wurde, geht beim Löschen verloren.';
 const BACKUP_NAME = /^Zwischenspeicher vom \d{2}\.\d{2}\.\d{4} um \d{2}꞉\d{2} für ParentsDay\.json$/;
@@ -75,131 +106,13 @@ const ym = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, 
 const D1 = `${ym}-12`;
 const D2 = `${ym}-13`;
 
-// Erwartete Werte aus Passwort, Name und Geburtsdatum – wie im Browser, hier in Node berechnet.
-const derived = new Map();
-function keysFor(password) {
-  if (!derived.has(password)) derived.set(password, deriveCloudKeys(password, SAMPLE_TEACHER));
-  return derived.get(password);
-}
-
-// ---------- Umgebung ----------
-
-/** Dienst, Webserver (mit diesem Dienst als MAILBOX_URL) und Geräte (Browser) für einen Test. */
-async function setup() {
-  const mb = await startMailboxServer();
-  const web = await startServer({ mailboxUrl: mb.url });
-  mb.env.ALLOWED_ORIGINS = new URL(web.url).origin;
-  const devices = [];
-  return {
-    mb,
-    web,
-    /** Neues Gerät (eigener Browser). Protokolliert alle Anfragen – keine darf an workers.dev gehen. */
-    async open(opts) {
-      const d = await launch(opts);
-      d.requests = [];
-      d.context.on('request', (req) => d.requests.push(`${req.method()} ${req.url()}`));
-      devices.push(d);
-      return d;
-    },
-    async close() {
-      for (const d of devices) await d.browser.close().catch(() => {});
-      await web.close();
-      await mb.close();
-    },
-  };
-}
-
-/** Prüft ein Gerät: keine unerwarteten Konsolenfehler, keine Anfrage an den echten Dienst. */
-function assertClean(d, label, ...allowed) {
-  assert.deepEqual(
-    d.errors.filter((e) => !allowed.some((re) => re.test(e))),
-    [],
-    `${label}: unerwartete Konsolenfehler`,
-  );
-  assert.deepEqual(
-    d.requests.filter((r) => /workers\.dev/.test(r)),
-    [],
-    `${label}: Anfrage an den echten Briefkasten`,
-  );
-}
-
-async function waitUntil(predicate, message, timeout = 30000) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) {
-    const value = await predicate();
-    if (value) return value;
-    await sleep(50);
-  }
-  assert.fail(message);
-}
-
-const waitHash = (page, hash) => page.waitForFunction((h) => location.hash === h, hash, SLOW);
-
 // ---------- Dienst (Datenbank) ----------
-
-/** Zeilen einer Tabelle als einfache Objekte ([] solange es die Tabelle noch nicht gibt). */
-function rows(mb, sql, ...params) {
-  try {
-    return mb.db.db
-      .prepare(sql)
-      .all(...params)
-      .map((r) => ({ ...r }));
-  } catch {
-    return []; // Tabellen entstehen erst mit der ersten Anfrage an den Dienst
-  }
-}
-
-/** Schlüssel der Zeile einer Sicherung beim Dienst: base64url(SHA-256("cloud|who|syncId")). */
-const rowId = (k) => createHash('sha256').update(`cloud|${k.who}|${k.syncId}`).digest('base64url');
-
-const cloudRows = (mb) => rows(mb, 'SELECT id, version, updated_at, seen_at, auth_hash, admin_hash, devices, iv, z, chunks, size FROM backups ORDER BY rowid');
-const chunkRows = (mb) => rows(mb, 'SELECT backup_id, idx, length(data) AS len FROM backup_chunks ORDER BY backup_id, idx');
-/** Zeile der Sicherung zu den Schlüsseln `k` ({ who, syncId }) oder null. */
-const cloudRow = (mb, k) => cloudRows(mb).find((r) => r.id === rowId(k)) || null;
-
-/** Zähler der Versuche je Lehrkraft: { perIp, perDay } (Schlüssel „o|who|ip“ bzw. „o|who“). */
-function attempts(mb, who) {
-  const list = rows(mb, 'SELECT key, n FROM cloud_limits');
-  return {
-    perIp: list.filter((r) => r.key.startsWith(`o|${who}|`)).reduce((n, r) => n + r.n, 0),
-    perDay: list.find((r) => r.key === `o|${who}`)?.n ?? 0,
-  };
-}
 
 /** Zähler neuer Sicherungen je Anschluss (Schlüssel „c|ip“ bzw. Zeichen „cb|ip“), zusammengezählt. */
 function createCounters(mb) {
   const list = rows(mb, 'SELECT key, n FROM cloud_limits');
   const sum = (prefix) => list.filter((r) => r.key.startsWith(prefix)).reduce((n, r) => n + r.n, 0);
   return { creates: sum('c|'), chars: sum('cb|') };
-}
-
-/** Wartet, bis die Sicherung zu `k` mindestens `version` erreicht hat. */
-function waitVersion(mb, k, version) {
-  return waitUntil(() => {
-    const row = cloudRow(mb, k);
-    return row && row.version >= version ? row : null;
-  }, `Cloud-Sicherung erreicht Version ${version} nicht`);
-}
-
-/** Entschlüsselt die Sicherung im Dienst mit den Schlüsseln eines Geräts (wie der Browser, mit der Version). */
-async function decryptStored(mb, keys) {
-  const row = cloudRow(mb, keys);
-  assert.ok(row, 'Cloud-Sicherung vorhanden');
-  const ct = rows(mb, 'SELECT data FROM backup_chunks WHERE backup_id = ? ORDER BY idx', row.id)
-    .map((r) => r.data)
-    .join('');
-  return decryptCloudData(keys, { iv: row.iv, ct, z: row.z, version: row.version });
-}
-
-/** Wartet, bis der entschlüsselte Inhalt der Sicherung `predicate` erfüllt, und gibt ihn zurück. */
-async function waitContent(mb, keys, predicate, message) {
-  let content = null;
-  await waitUntil(async () => {
-    if (!cloudRow(mb, keys)) return false;
-    content = await decryptStored(mb, keys);
-    return predicate(content);
-  }, message);
-  return content;
 }
 
 /** Gesamter Inhalt der Datenbank als Text (zum Prüfen, was der Dienst NICHT kennt). */
@@ -253,174 +166,12 @@ function api(mb) {
 
 // ---------- Gerät (Browser) ----------
 
-const readState = (page, code = T_CODE) => page.evaluate((c) => JSON.parse(localStorage.getItem(`parentsday.teacher.${c}`) || 'null'), code);
-
-/** Einstellungen, Schlüssel und Geräte-Geheimnis der Cloud-Sicherung im Speicher des Browsers. */
-const readCloud = (page, code = T_CODE) =>
-  page.evaluate(
-    (c) => ({
-      config: JSON.parse(localStorage.getItem(`parentsday.cloud.${c}`) || 'null'),
-      localKey: JSON.parse(localStorage.getItem(`parentsday.cloudKey.${c}`) || 'null'),
-      sessionKey: JSON.parse(sessionStorage.getItem(`parentsday.cloudKey.${c}`) || 'null'),
-      device: JSON.parse(localStorage.getItem(`parentsday.cloudDevice.${c}`) || 'null'),
-    }),
-    code,
-  );
-
-/** Schlüssel eines Geräts (gemerkt oder nur für die Sitzung). */
-async function keysOf(page) {
-  const cloud = await readCloud(page);
-  return cloud.localKey || cloud.sessionKey;
-}
-
-/** Alles, was ParentsDay im Browser gespeichert hat (Text). */
-const allStorage = (page) => page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
-
-/** Schlüssel im Speicher, die zur Lehrkraft gehören. */
-const teacherKeys = (page) =>
-  page.evaluate((code) => [...Object.keys(localStorage), ...Object.keys(sessionStorage)].filter((k) => k.includes(code) || k === 'parentsday.session'), T_CODE);
-
-const classIds = (state) => (state?.classes || []).map((c) => c.id);
-
-function classOf(id) {
-  return { id, grade: Number(id.slice(0, -1)), letter: id.slice(-1), codesGenerated: false, students: [] };
-}
-
-const indicator = (page) => page.locator(tid('cloud-indicator'));
-const waitIndicator = (page, state) => page.locator(`${tid('cloud-indicator')}[data-state="${state}"]`).waitFor(SLOW);
-// .last(): Ein gleichlautender Hinweis von vorhin kann noch zu sehen sein.
-const toastWith = (page, text) => page.locator('.toast', { hasText: text }).last();
-const modalTitle = (page) => page.locator('.modal-title').last();
-
-/** Abgleich direkt anstoßen (dasselbe Modul wie in der App) – gibt den Zustand danach zurück. */
-const syncNow = (page) => page.evaluate(() => import('/js/core/cloud-sync.js').then((m) => m.syncCloudNow()));
-
-/** Legt den Stand einer Lehrkraft im Browser ab (ohne Anmeldung – wie ein früher genutztes Gerät). */
-async function seedWithoutSession(page, web, state) {
-  await page.goto(web.url);
-  await page.evaluate((s) => localStorage.setItem(`parentsday.teacher.${s.teacher.teacherCode}`, JSON.stringify(s)), state);
-}
-
-/** Anmelden mit Namen, Geburtsdatum und Registrierungscode. */
-async function fillLogin(page, web, teacher = SAMPLE_TEACHER) {
-  await page.goto(`${web.url}#/lehrkraft/anmelden`);
-  await page.fill(tid('login-firstname'), teacher.firstName);
-  await page.fill(tid('login-lastname'), teacher.lastName);
-  await page.fill(tid('login-birthdate'), teacher.birthDate);
-  await page.fill(tid('login-code'), teacher.registrationCode.toLowerCase());
-  await page.click(tid('login-submit'));
-}
-
-/** Passwort im Dialog „Passwort eingeben“ eingeben (Dialog schließt sich danach). */
-async function unlockWith(page, password, { remember = false } = {}) {
-  const dlg = page.locator(tid('cloud-unlock-dialog'));
-  await dlg.waitFor(SLOW);
-  await page.fill(tid('cloud-unlock-password'), password);
-  if (remember) await page.check(tid('cloud-unlock-remember'));
-  await page.click(tid('cloud-unlock-submit'));
-  await dlg.waitFor({ state: 'detached', ...SLOW });
-}
-
-/** Falsches Passwort im Dialog: Fehlermeldung am Feld, Dialog bleibt offen. Gibt die Meldung zurück. */
-async function wrongPassword(page, password = WRONG_PASSWORD) {
-  await page.fill(tid('cloud-unlock-password'), password);
-  await page.click(tid('cloud-unlock-submit'));
-  const error = page.locator('#cloud-unlock-password-error:not([hidden])');
-  await error.waitFor(SLOW);
-  // Knopf wieder bereit für den nächsten Versuch
-  await page.locator(`${tid('cloud-unlock-submit')}:not([disabled])`).waitFor(SLOW);
-  return flat(await error.textContent());
-}
-
-/** Passwort im Dialog, das der Dienst wegen der Sperre abweist: Meldung im Dialog, der offen bleibt. */
-async function lockedPassword(page, password) {
-  await page.fill(tid('cloud-unlock-password'), password);
-  await page.click(tid('cloud-unlock-submit'));
-  const alert = page.locator(`${tid('cloud-unlock-dialog')} .alert-error`);
-  await alert.waitFor(SLOW);
-  await page.locator(`${tid('cloud-unlock-submit')}:not([disabled])`).waitFor(SLOW);
-  return flat(await alert.textContent());
-}
-
-/** Neues Passwort in einem Dialog mit zwei Feldern (Präfix z. B. „cloud-setup“) eingeben. */
-async function fillNewPassword(page, prefix, password) {
-  await page.fill(tid(`${prefix}-password`), password);
-  await page.fill(tid(`${prefix}-password2`), password);
-}
-
-/** Klasse auf der Klassenübersicht anlegen. */
-async function addClass(page, id) {
-  await page.locator(tid('class-grade')).waitFor();
-  await page.selectOption(tid('class-grade'), id.slice(0, -1));
-  await page.selectOption(tid('class-letter'), id.slice(-1));
-  await page.click(tid('class-create'));
-  await page.locator(tid(`class-tile-${id}`)).waitFor();
-}
-
-/** Kacheln der Klassenübersicht. */
-const tiles = (page) => page.$$eval('[data-testid^="class-tile-"]', (els) => els.map((e) => e.dataset.testid.replace('class-tile-', '')));
-
-const goSettings = (page) => page.click('.header-nav a[href="#/lehrkraft/einstellungen"]');
-const goClasses = (page) => page.click('.header-nav a[href="#/lehrkraft/klassen"]');
-
-/** Zurück auf die Seite (focus) – danach wird geprüft, ob es einen neueren Stand gibt. */
-const refocus = (page) => page.evaluate(() => window.dispatchEvent(new Event('focus')));
-
 /** „Alle Daten in diesem Browser löschen“ unter „Weitere Einstellungen“ – gibt den Dialog zurück. */
 async function openDeleteAll(page) {
   await page.getByRole('button', { name: 'Alle Daten in diesem Browser löschen' }).click();
   const dlg = page.locator('.modal', { hasText: 'Alle Daten in diesem Browser löschen?' });
   await dlg.waitFor(SLOW);
   return dlg;
-}
-
-/**
- * Gerät A: Lehrkraft mit Stand (Elternsprechtag und Klassen) meldet sich an und richtet im Dialog nach der
- * Anmeldung die Cloud-Sicherung ein (Gerät mit Daten → zuerst „Cloud-Sicherung einrichten“).
- */
-async function deviceWithCloud(s, { classes = ['5a'], password = PASSWORD } = {}) {
-  const d = await s.open();
-  await seedWithoutSession(d.page, s.web, sampleState({ classes: classes.map(classOf) }));
-  await fillLogin(d.page, s.web);
-  await d.page.locator(tid('cloud-setup-dialog')).waitFor(SLOW);
-  await fillNewPassword(d.page, 'cloud-setup', password);
-  await d.page.click(tid('cloud-setup-submit'));
-  await waitHash(d.page, '#/lehrkraft/klassen');
-  await waitIndicator(d.page, 'ok');
-  return d;
-}
-
-/** Weiteres Gerät: meldet sich mit den Daten an und gibt das Passwort ein – der Stand kommt aus der Cloud. */
-async function deviceUnlocked(s, { password = PASSWORD, remember = false } = {}) {
-  const d = await s.open();
-  await fillLogin(d.page, s.web);
-  await unlockWith(d.page, password, { remember });
-  await waitHash(d.page, '#/lehrkraft/klassen');
-  await waitIndicator(d.page, 'ok');
-  return d;
-}
-
-/** Abmelden über die Kopfzeile (optional mit „Meine Daten von diesem Gerät entfernen“). */
-async function logout(page, { remove = false } = {}) {
-  await page.locator('.header-actions').getByRole('button', { name: 'Abmelden', exact: true }).click();
-  const dlg = page.locator('.modal', { hasText: 'Abmelden?' });
-  await dlg.waitFor();
-  if (remove) await page.check(tid('logout-remove'));
-  await dlg.getByRole('button', { name: 'Abmelden', exact: true }).click();
-  await waitHash(page, '#/');
-}
-
-/** Registrierung über das Formular (mit Passwort); wartet auf den Hinweis zur Cloud-Sicherung. */
-async function register(page, web, { password = PASSWORD, email = SAMPLE_TEACHER.email } = {}) {
-  await page.goto(`${web.url}#/lehrkraft/registrieren`);
-  await page.fill(tid('reg-firstname'), SAMPLE_TEACHER.firstName);
-  await page.fill(tid('reg-lastname'), SAMPLE_TEACHER.lastName);
-  await page.fill(tid('reg-birthdate'), SAMPLE_TEACHER.birthDate);
-  await page.fill(tid('reg-email'), email);
-  await fillNewPassword(page, 'reg', password);
-  const reg = await captureDownload(page, () => page.click(tid('reg-submit')));
-  await page.locator(tid('reg-cloud-note')).waitFor(SLOW);
-  return reg;
 }
 
 // ---------- PDF ----------
@@ -898,6 +649,7 @@ test('Lehrkraft ohne Cloud-Sicherung: nach der Anmeldung zuerst „Einrichten“
     assert.equal(await page.evaluate(() => location.hash), '#/lehrkraft/anmelden', 'Dialog vor dem Weiterleiten');
     assert.equal(flat(await modalTitle(page).textContent()), 'Cloud-Sicherung einrichten');
     assert.ok(flat(await setupDlg.textContent()).includes(SETUP_INTRO));
+    assert.ok(flat(await setupDlg.textContent()).includes('Mit diesem Passwort können Sie sich künftig auch anmelden.'), 'Passwort gilt auch zum Anmelden');
     assert.equal(flat(await page.textContent(tid('cloud-setup-later'))), 'Später');
     assert.equal(await page.isChecked(tid('cloud-setup-remember')), true);
 
@@ -1042,6 +794,7 @@ test('Passwort ändern: nur mit dem bisherigen Passwort; alte Sicherung gelösch
     const dlg = a.page.locator(tid('cloud-change-dialog'));
     await dlg.waitFor();
     assert.equal(flat(await a.page.textContent(tid('cloud-change-forgot'))), 'Bisheriges Passwort vergessen?');
+    assert.ok(flat(await dlg.textContent()).includes('Zum Anmelden mit Passwort gilt ab sofort das neue.'));
     // Ohne bisheriges Passwort
     await fillNewPassword(a.page, 'cloud-newpw', NEW_PASSWORD);
     await a.page.click(tid('cloud-change-submit'));
@@ -1274,6 +1027,7 @@ test('Passwort vergessen an einem verbundenen Gerät: Die Sicherung zieht unter 
     const move = a.page.locator(tid('cloud-move-dialog'));
     await move.waitFor();
     assert.equal(flat(await modalTitle(a.page).textContent()), 'Neues Passwort festlegen');
+    assert.ok(flat(await move.textContent()).includes('Zum Anmelden mit Passwort gilt ab sofort das neue.'));
     await fillNewPassword(a.page, 'cloud-move', 'kurz');
     await a.page.click(tid('cloud-move-submit'));
     assert.equal(await a.page.textContent('#cloud-move-password-error'), 'Das Passwort muss mindestens 10 Zeichen lang sein.');
@@ -1357,6 +1111,7 @@ test('Cloud-Sicherung löschen (Karte unter „Weitere Einstellungen“) nur mit
     const dlg = a.page.locator(tid('cloud-delete-dialog'));
     await dlg.waitFor();
     assert.equal(flat(await modalTitle(a.page).textContent()), 'Cloud-Sicherung löschen?');
+    assert.ok(flat(await dlg.textContent()).includes('an neuen Geräten melden Sie sich mit Ihrer Registrierungs-PDF oder Ihrem Registrierungscode an.'), 'Anmelden mit Passwort an neuen Geräten entfällt');
     await a.page.click(tid('cloud-delete-submit'));
     assert.equal(await a.page.textContent('#cloud-delete-password-error'), 'Bitte geben Sie Ihr Passwort ein.');
     await a.page.fill(tid('cloud-delete-password'), WRONG_PASSWORD);

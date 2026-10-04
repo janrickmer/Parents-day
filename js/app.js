@@ -193,7 +193,7 @@ async function onLogout(e) {
       ? h(
           'div',
           { class: 'stack-small' },
-          h('p', {}, 'Ihr Stand ist in Ihrer Cloud-Sicherung. An jedem Gerät melden Sie sich einfach an und geben Ihr Passwort ein.'),
+          h('p', {}, 'Ihr Stand ist in Ihrer Cloud-Sicherung. An jedem Gerät melden Sie sich einfach mit Ihrem Passwort an.'),
           h(
             'div',
             { class: 'cloud-remember cloud-logout-option' },

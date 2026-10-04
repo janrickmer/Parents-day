@@ -425,6 +425,8 @@ test('Gesamtablauf mit digitalem Briefkasten: Absenden per Briefkasten, Notlösu
     const device = await open();
     const dp = device.page;
     await dp.goto(`${web.url}#/lehrkraft/anmelden`);
+    // Ohne Cloud-Sicherung: statt des Passworts den Registrierungscode
+    await dp.click(tid('login-use-code'));
     await dp.fill(tid('login-firstname'), 'Anna');
     await dp.fill(tid('login-lastname'), 'Meier');
     await dp.fill(tid('login-birthdate'), '1990-03-15');

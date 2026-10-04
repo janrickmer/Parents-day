@@ -78,7 +78,7 @@ function cloudSection() {
       h(
         'li',
         {},
-        'Um das Ausprobieren von Passwörtern zu verhindern, zählt der Dienst Versuche, eine Sicherung zu öffnen oder anzulegen – je Lehrkraft (anhand eines Hashwerts aus Name und Geburtsdatum, der nicht mit der Sicherung gespeichert wird) und Internetanschluss. Statt der IP-Adresse speichert er dafür einen pseudonymen Hashwert, der täglich wechselt; diese Zähler werden nach spätestens zwei Tagen gelöscht.',
+        'Um das Ausprobieren von Passwörtern zu verhindern, zählt der Dienst Versuche, eine Sicherung zu öffnen oder anzulegen (auch Anmeldungen mit falschem Passwort) – je Lehrkraft (anhand eines Hashwerts aus Name und Geburtsdatum, der nicht mit der Sicherung gespeichert wird) und Internetanschluss. Statt der IP-Adresse speichert er dafür einen pseudonymen Hashwert, der täglich wechselt; diese Zähler werden nach spätestens zwei Tagen gelöscht.',
       ),
       h('li', {}, 'Die Lehrkraft kann die Cloud-Sicherung jederzeit unter „Weitere Einstellungen“ löschen. Wird sie 400 Tage weder geändert noch abgerufen, wird sie automatisch gelöscht – eine Sicherung, die nach dem Einrichten nie genutzt wurde, schon nach 30 Tagen.'),
       h('li', {}, 'Ist das Passwort auf einem Gerät gemerkt, liegen die daraus berechneten Schlüssel im Speicher dieses Browsers – wie der Stand selbst auch. Zum Ändern des Passworts und zum Löschen der Sicherung ist immer das Passwort nötig.'),

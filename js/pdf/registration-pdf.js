@@ -53,7 +53,7 @@ function drawCodeBox(doc, y, teacher) {
       label: 'Registrierungscode',
       code: teacher.registrationCode,
       size: 26,
-      hint: 'Zum Anmelden – zusammen mit Vorname, Nachname und Geburtsdatum.',
+      hint: mailboxEnabled() ? 'Zum Anmelden ohne Passwort – zusammen mit Vorname, Nachname und Geburtsdatum.' : 'Zum Anmelden – zusammen mit Vorname, Nachname und Geburtsdatum.',
     },
     {
       x: rightX,
@@ -136,7 +136,9 @@ export async function createRegistrationPdf(teacher) {
   y = writeParagraph(doc, `Guten Tag ${name},`, y, { spacingAfter: 1.5 });
   y = writeParagraph(
     doc,
-    `vielen Dank für Ihre Registrierung. In diesem Dokument finden Sie Ihre Angaben und Ihre persönlichen Codes. Mit dieser PDF-Datei – oder mit Ihrem Registrierungscode – können Sie sich jederzeit wieder bei ${APP_NAME} anmelden.`,
+    mailboxEnabled()
+      ? `vielen Dank für Ihre Registrierung. In diesem Dokument finden Sie Ihre Angaben und Ihre persönlichen Codes. Anmelden können Sie sich bei ${APP_NAME} mit Ihrem Passwort – oder jederzeit auch mit dieser PDF-Datei bzw. Ihrem Registrierungscode.`
+      : `vielen Dank für Ihre Registrierung. In diesem Dokument finden Sie Ihre Angaben und Ihre persönlichen Codes. Mit dieser PDF-Datei – oder mit Ihrem Registrierungscode – können Sie sich jederzeit wieder bei ${APP_NAME} anmelden.`,
     y,
     { spacingAfter: 6 },
   );
@@ -157,11 +159,18 @@ export async function createRegistrationPdf(teacher) {
 
   y = writeParagraph(doc, 'So melden Sie sich an', y, { size: 14, bold: true, color: COLORS.primary, spacingAfter: 2.5 });
   y = writeStep(doc, 1, `Öffnen Sie ${PUBLIC_URL} und klicken Sie auf „Zugang für Lehrkräfte“ und danach auf „Anmelden“.`, y, { url: PUBLIC_URL });
-  y = writeStep(doc, 2, 'Laden Sie diese PDF-Datei hoch – oder geben Sie Vorname, Nachname, Geburtsdatum und Registrierungscode ein.', y);
+  y = writeStep(
+    doc,
+    2,
+    mailboxEnabled()
+      ? 'Geben Sie Vorname, Nachname, Geburtsdatum und Ihr Passwort ein. Ohne Passwort laden Sie diese PDF-Datei hoch – oder Sie geben statt des Passworts Ihren Registrierungscode ein.'
+      : 'Laden Sie diese PDF-Datei hoch – oder geben Sie Vorname, Nachname, Geburtsdatum und Registrierungscode ein.',
+    y,
+  );
   y += 4;
 
   const note = mailboxEnabled()
-    ? `${APP_NAME} speichert Ihre Daten in Ihrem Browser und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung. An einem neuen Gerät melden Sie sich an und geben das Passwort ein; dann ist Ihr aktueller Stand da. Ihr Passwort steht aus Sicherheitsgründen nicht in diesem Dokument. Ohne es lässt sich die Cloud-Sicherung nicht öffnen – auch nicht von ${APP_NAME}.`
+    ? `${APP_NAME} speichert Ihre Daten in Ihrem Browser und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung. An einem neuen Gerät melden Sie sich mit dem Passwort an; dann ist Ihr aktueller Stand da. Ihr Passwort steht aus Sicherheitsgründen nicht in diesem Dokument. Ohne es lässt sich die Cloud-Sicherung nicht öffnen – auch nicht von ${APP_NAME}.`
     : `${APP_NAME} speichert Ihre Daten nur in dem Browser, mit dem Sie arbeiten – nicht auf einem Server. Möchten Sie an einem anderen Gerät weiterarbeiten, speichern Sie über „Zwischenstand speichern“ eine Datei und laden Sie diese dort nach der Anmeldung über „Zwischenstand laden“.`;
   // Lange Namen oder E-Mail-Adressen: „Gut zu wissen“ notfalls auf die zweite Seite, statt in die Fußzeile zu laufen.
   setText(doc, { size: 11 });

@@ -144,13 +144,28 @@ function forgetKeys(code) {
   removeKey(sessionStorage, KEY_PREFIX + code);
 }
 
+/** Gespeichertes Geräte-Geheimnis dieses Browsers für die Lehrkraft oder null. */
+function storedDeviceSecret(code) {
+  const stored = readJson(localStorage, DEVICE_PREFIX + code);
+  return typeof stored === 'string' && /^[A-Za-z0-9_-]{43}$/.test(stored) ? stored : null;
+}
+
+// Geräte-Geheimnisse aus Anmeldungen mit Passwort, die noch nicht gespeichert sind (je Lehrkräftecode): Weitere
+// Versuche im selben Seitenaufruf verwenden dasselbe – ging eine Antwort verloren, ist es beim Dienst schon eingetragen.
+const loginDevices = new Map();
+
 /** Geräte-Geheimnis dieses Browsers für die Lehrkraft (wird bei Bedarf angelegt). */
 function deviceSecret(code) {
-  const stored = readJson(localStorage, DEVICE_PREFIX + code);
-  if (typeof stored === 'string' && /^[A-Za-z0-9_-]{43}$/.test(stored)) return stored;
-  const secret = newDeviceSecret();
-  writeJson(localStorage, DEVICE_PREFIX + code, secret);
+  const stored = storedDeviceSecret(code);
+  if (stored) return stored;
+  const secret = loginDevices.get(code) || newDeviceSecret();
+  keepDeviceSecret(code, secret);
   return secret;
+}
+
+function keepDeviceSecret(code, device) {
+  if (storedDeviceSecret(code) !== device) writeJson(localStorage, DEVICE_PREFIX + code, device);
+  loginDevices.delete(code);
 }
 
 /** Kennt dieses Gerät (bzw. dieser Tab) das Passwort der Cloud-Sicherung? */
@@ -692,6 +707,11 @@ export function activeCloudTeacher() {
   return active;
 }
 
+/** Wartet, bis laufende bzw. schon angestoßene Abgleiche fertig sind. */
+export function whenCloudIdle() {
+  return exclusive(() => {});
+}
+
 /**
  * Noch nicht hochgeladene Änderungen sofort sichern und einen laufenden Abgleich abwarten (höchstens `timeout` ms),
  * z. B. vor dem Abmelden.
@@ -780,7 +800,14 @@ export async function setupCloud(teacher, password, { remember = true } = {}) {
  * inzwischen geändert), MailboxError 429 (zu viele Versuche) oder ohne Verbindung.
  */
 export async function unlockCloud(teacher, password) {
-  const keys = await keysFor(teacher.teacherCode, teacher, password);
+  return openWithKeys(await keysFor(teacher.teacherCode, teacher, password));
+}
+
+/**
+ * Wie unlockCloud, aber mit schon vorhandenen Schlüsseln (z. B. Gerät beim Dienst nicht mehr eingetragen: öffnen trägt
+ * es wieder ein).
+ */
+export async function openWithKeys(keys) {
   const rec = await openCloudRecord(keys, keys.device);
   if (!rec.found) throw new CloudNotFoundError();
   let remote;
@@ -791,6 +818,69 @@ export async function unlockCloud(teacher, password) {
     throw err;
   }
   return { keys, version: rec.version, updatedAt: rec.updatedAt, remote };
+}
+
+/**
+ * Anmelden mit dem Passwort der Cloud-Sicherung. Gehört das Passwort zur Cloud-Sicherung dieses Geräts (Schlüssel
+ * gespeichert oder Einstellungen mit derselben Adresse – auch wenn das Passwort nicht gemerkt wurde oder die
+ * Sicherung noch gar nicht angelegt ist), wird es ohne Verbindung bestätigt → { known: true, keys } (dann mit
+ * restoreCloudKeys übernehmen). Sonst wird die Sicherung beim Dienst geöffnet wie mit unlockCloud
+ * → { known: false, unlocked } (übernehmen mit adoptCloud). Bei einem falschen Passwort wird auf dem Gerät nichts
+ * gespeichert – auch kein Geräte-Geheimnis.
+ * Wirft CloudNotFoundError (falsches Passwort, falsche Angaben oder keine Sicherung; moved: Passwort inzwischen
+ * geändert), MailboxError 429 (zu viele Versuche) oder ohne Verbindung.
+ * @returns {Promise<{known: true, keys: object} | {known: false, unlocked: object}>}
+ */
+export async function checkLoginPassword(teacher, password) {
+  const code = teacher.teacherCode;
+  const device = storedDeviceSecret(code) || loginDevices.get(code) || newDeviceSecret();
+  const keys = { ...(await deriveCloudKeys(password, teacher)), device };
+  const stored = loadKeys(code);
+  if (stored && stored.syncId === keys.syncId && stored.authToken === keys.authToken) return { known: true, keys: stored };
+  // Die Adresse der Sicherung entsteht aus dem Passwort – stimmt sie mit den Einstellungen überein, ist es richtig.
+  if (loadCloudConfig(code)?.syncId === keys.syncId) {
+    keepDeviceSecret(code, device);
+    return { known: true, keys };
+  }
+  loginDevices.set(code, device);
+  let unlocked;
+  try {
+    unlocked = await openWithKeys(keys);
+  } catch (err) {
+    // Passwort vom Dienst bestätigt (Gerät eingetragen), nur das Lesen scheiterte: dasselbe Geheimnis behalten.
+    if (!(err instanceof CloudNotFoundError) && !(err instanceof MailboxError)) keepDeviceSecret(code, device);
+    throw err;
+  }
+  keepDeviceSecret(code, device);
+  return { known: false, unlocked };
+}
+
+/**
+ * Schlüssel zum Passwort, wenn es zur Cloud-Sicherung gehört, mit der dieses Gerät eingerichtet ist – sonst null
+ * (ohne Verbindung; danach mit restoreCloudKeys ablegen).
+ */
+export async function deviceCloudKeys(teacher, password) {
+  const code = teacher.teacherCode;
+  const cfg = loadCloudConfig(code);
+  if (!cfg) return null;
+  const derived = await deriveCloudKeys(password, teacher);
+  return derived.syncId === cfg.syncId ? { ...derived, device: deviceSecret(code) } : null;
+}
+
+/**
+ * Legt Schlüssel zur Cloud-Sicherung dieses Geräts (checkLoginPassword bzw. deviceCloudKeys) wieder ab: Das Gerät ist
+ * damit verbunden. remember: „Passwort merken“ neu wählen – ohne Angabe bleibt die bisherige Wahl des Geräts.
+ */
+export function restoreCloudKeys(code, keys, remember = undefined) {
+  const cfg = loadCloudConfig(code);
+  if (!cfg || cfg.syncId !== keys.syncId) return;
+  const keep = remember === undefined ? cfg.remember : Boolean(remember);
+  if (keep !== cfg.remember) {
+    updateConfig(code, (c) => {
+      c.remember = keep;
+    });
+  }
+  saveKeys(code, keys, keep);
 }
 
 /**

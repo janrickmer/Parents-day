@@ -697,7 +697,7 @@ export default function render(ctx) {
         ? h(
             'p',
             { 'data-testid': 'delete-all-cloud-note' },
-            'Ihre Cloud-Sicherung bleibt erhalten: Melden Sie sich wieder an und geben Ihr Passwort ein, ist Ihr Stand wieder da.',
+            'Ihre Cloud-Sicherung bleibt erhalten: Melden Sie sich wieder mit Ihrem Passwort an, ist Ihr Stand wieder da.',
             cloudConnected ? ' Möchten Sie auch sie löschen, nutzen Sie vorher oben „Cloud-Sicherung löschen“.' : '',
           )
         : null,

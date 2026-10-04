@@ -1,5 +1,6 @@
 // Zugang für Lehrkräfte: Auswahl (Registrieren/Anmelden), Registrierung mit PDF-Download und
-// Anmeldung per Registrierungs-PDF oder per Eingabe von Name, Geburtsdatum und Registrierungscode.
+// Anmeldung per Registrierungs-PDF oder per Eingabe von Name, Geburtsdatum und Passwort der Cloud-Sicherung
+// (mit dem Briefkasten-Dienst) bzw. Registrierungscode.
 
 import { MAX_REGISTRATION_BYTES, NAME_MAX_LENGTH } from '../config.js';
 import { h, mount, toast, field, alertBox, fileDropZone, friendlyError } from '../core/ui.js';
@@ -9,10 +10,10 @@ import { getSession, setSession, clearSession, loadTeacherState, createTeacherSt
 import { savePdf, extractPayloadFromFile, preloadPdf } from '../core/pdf.js';
 import { createRegistrationPdf } from '../pdf/registration-pdf.js';
 import { markEmptyDevice } from '../components/backup-actions.js';
-import { mailboxEnabled } from '../core/mailbox.js';
-import { cloudEnabled } from '../core/cloud.js';
-import { stopCloudSync, endCloudSession, flushCloudSync } from '../core/cloud-sync.js';
-import { newPasswordFields, rememberCheckbox, cloudAfterRegister, cloudAfterLogin } from '../components/cloud-ui.js';
+import { mailboxEnabled, MailboxError } from '../core/mailbox.js';
+import { cloudEnabled, cloudErrorMessage } from '../core/cloud.js';
+import { stopCloudSync, endCloudSession, flushCloudSync, whenCloudIdle, checkLoginPassword, CloudNotFoundError } from '../core/cloud-sync.js';
+import { passwordField, newPasswordFields, rememberCheckbox, cloudAfterRegister, cloudAfterLogin, cloudAfterPasswordLogin } from '../components/cloud-ui.js';
 
 const MIN_BIRTH_DATE = '1900-01-01';
 const NOT_REGISTRATION = 'Diese Datei ist keine ParentsDay-Registrierung.';
@@ -22,6 +23,13 @@ const CODE_COLLISION =
   'In diesem Browser sind bereits Daten einer anderen Lehrkraft mit demselben Lehrkräftecode gespeichert (gleiche Anfangsbuchstaben und gleiches Geburtsdatum). Zum Schutz dieser Daten nutzen Sie ParentsDay bitte in einem anderen Browser oder Browserprofil.';
 const BACKUP_NOT_LOGIN =
   'Diese Datei ist ein Zwischenstand, keine Registrierungs-PDF. Bitte melden Sie sich zuerst an – mit Ihrer Registrierungs-PDF oder mit Ihren Daten. Danach können Sie den Zwischenstand oben über „Zwischenstand laden“ öffnen.';
+const WRONG_PASSWORD =
+  'Das Passwort passt nicht zu Ihren Angaben. Bitte prüfen Sie das Passwort (auch Groß- und Kleinschreibung), Ihren Namen und Ihr Geburtsdatum. Ohne Cloud-Sicherung melden Sie sich mit Ihrem Registrierungscode an.';
+const MOVED_PASSWORD = 'Das Passwort Ihrer Cloud-Sicherung wurde inzwischen auf einem anderen Gerät geändert. Bitte melden Sie sich mit dem neuen Passwort an.';
+const FORGOT_PASSWORD =
+  'Ohne Passwort melden Sie sich mit Ihrem Registrierungscode an – er steht in Ihrer Registrierungs-PDF – oder Sie laden die PDF hoch. Ein neues Passwort legen Sie danach über „Passwort vergessen?“ fest: im Fenster „Passwort eingeben“ oder unter „Weitere Einstellungen“ bei der Cloud-Sicherung. Am besten an einem Gerät, das noch mit Ihrer Cloud-Sicherung verbunden ist – dann bleibt Ihr Stand erhalten.';
+// Zuletzt erfolgreich genutzte Art der Anmeldung mit Daten ('password' oder 'code') – je Browser.
+const LOGIN_MODE_KEY = 'parentsday.loginMode';
 
 export default function render(ctx) {
   const mode = ctx.params?.mode;
@@ -217,7 +225,7 @@ function privacyNote() {
         'p',
         {},
         h('strong', {}, 'Ihre Daten werden in diesem Browser gespeichert und – mit Ihrem Passwort verschlüsselt – in der Cloud-Sicherung.'),
-        ' An einem anderen Gerät melden Sie sich einfach an und geben Ihr Passwort ein. Niemand sonst kann Ihre Daten lesen. ',
+        ' An einem anderen Gerät melden Sie sich einfach mit Ihrem Passwort an. Niemand sonst kann Ihre Daten lesen. ',
         h('a', { href: '#/datenschutz' }, 'Mehr zum Datenschutz'),
       ),
     );
@@ -285,7 +293,9 @@ function renderChoose(ctx) {
           icon: '→',
           eyebrow: 'Schon registriert',
           title: 'Anmelden',
-          text: 'Laden Sie Ihre Registrierungs-PDF hoch – oder geben Sie Ihren Namen, Ihr Geburtsdatum und Ihren Registrierungscode ein.',
+          text: cloudEnabled()
+            ? 'Geben Sie Ihren Namen, Ihr Geburtsdatum und Ihr Passwort ein – oder melden Sie sich mit Ihrer Registrierungs-PDF bzw. Ihrem Registrierungscode an.'
+            : 'Laden Sie Ihre Registrierungs-PDF hoch – oder geben Sie Ihren Namen, Ihr Geburtsdatum und Ihren Registrierungscode ein.',
           cta: 'Zur Anmeldung',
         }),
       ),
@@ -330,7 +340,7 @@ function renderRegister(ctx) {
           h(
             'p',
             { class: 'muted small tauth-cloud-text' },
-            'Ihr Stand wird automatisch gesichert – mit diesem Passwort schon in Ihrem Browser verschlüsselt. An jedem anderen Gerät melden Sie sich an, geben das Passwort ein und haben alles da. Das Passwort steht nicht in der Registrierungs-PDF: Merken Sie es sich gut. Hatten Sie schon eine Cloud-Sicherung, verwenden Sie dasselbe Passwort – dann wird Ihr Stand geladen.',
+            'Mit diesem Passwort melden Sie sich künftig an – an jedem Gerät, und Ihr aktueller Stand ist sofort da. Er wird automatisch gesichert, mit diesem Passwort schon in Ihrem Browser verschlüsselt. Das Passwort steht nicht in der Registrierungs-PDF: Merken Sie es sich gut. Hatten Sie schon eine Cloud-Sicherung, verwenden Sie dasselbe Passwort – dann wird Ihr Stand geladen.',
           ),
           h('div', { class: 'form-grid' }, pw.wraps),
           remember.wrap,
@@ -384,6 +394,7 @@ function renderRegister(ctx) {
     setBusy(submit, true, 'PDF wird erstellt …');
     let state;
     let existed = false;
+    let pending = null; // geänderte Angaben, die erst nach dem Abgleich mit der Cloud-Sicherung übernommen werden
     try {
       const firstName = cleanName(values.firstName);
       const lastName = cleanName(values.lastName);
@@ -402,13 +413,18 @@ function renderRegister(ctx) {
         return;
       }
       if (state) {
-        // Schon einmal in diesem Browser registriert: Angaben aktualisieren, Klassen und Termine behalten.
+        // Schon einmal in diesem Browser registriert: Angaben aktualisieren, Klassen und Termine behalten. Mit
+        // Cloud-Sicherung erst nach dem Abgleich – sonst gälte der Stand dieses (vielleicht veralteten) Geräts als
+        // der neuere.
         existed = true;
-        state.teacher = { ...state.teacher, ...teacher };
+        if (pw && password) pending = teacher;
+        else {
+          state.teacher = { ...state.teacher, ...teacher };
+          saveTeacherState(state);
+        }
       } else {
-        state = createTeacherState(teacher);
+        state = saveTeacherState(createTeacherState(teacher));
       }
-      saveTeacherState(state);
       // Gleich angemeldet: Neuladen oder „Zurück“ auf der Erfolgsseite führt nicht zu einem leeren Formular.
       setSession(teacher.teacherCode);
     } catch (err) {
@@ -420,7 +436,7 @@ function renderRegister(ctx) {
     let pdf = null;
     let pdfError = '';
     try {
-      pdf = await createRegistrationPdf(state.teacher);
+      pdf = await createRegistrationPdf({ ...state.teacher, ...pending });
       savePdf(pdf.doc, pdf.filename);
     } catch (err) {
       pdf = null;
@@ -437,6 +453,20 @@ function renderRegister(ctx) {
         console.warn(err);
         cloud = 'failed';
       }
+      if (pending) {
+        // Erst wenn der Abgleich wirklich fertig ist (er kann länger dauern als die Wartezeit oben).
+        await whenCloudIdle();
+        const current = loadTeacherState(state.teacher.teacherCode);
+        if (current && Object.keys(pending).some((key) => current.teacher[key] !== pending[key])) {
+          try {
+            updateState((s) => {
+              s.teacher = { ...s.teacher, ...pending };
+            });
+          } catch (err) {
+            console.warn(err);
+          }
+        }
+      }
       state = loadTeacherState(state.teacher.teacherCode) || state;
     }
     // Seite inzwischen verlassen? Dann nicht mehr in die alte Ansicht zeichnen.
@@ -449,18 +479,35 @@ function renderRegister(ctx) {
 function cloudRegisterNote(cloud) {
   if (!cloud) return null;
   const note = (type, strong, text) => alertBox(type, h('p', { 'data-testid': 'reg-cloud-note' }, h('strong', {}, strong), text));
-  if (cloud === 'created') return note('success', 'Cloud-Sicherung eingerichtet. ', 'Ihr Stand wird ab jetzt automatisch gesichert. An einem anderen Gerät melden Sie sich an und geben Ihr Passwort ein.');
+  if (cloud === 'created') return note('success', 'Cloud-Sicherung eingerichtet. ', 'Ihr Stand wird ab jetzt automatisch gesichert. Anmelden können Sie sich an jedem Gerät mit Namen, Geburtsdatum und Ihrem Passwort.');
   if (cloud === 'restored') return note('success', 'Ihre Cloud-Sicherung wurde geladen. ', 'Mit diesem Passwort gab es schon eine Cloud-Sicherung – Ihr Stand ist jetzt auch auf diesem Gerät.');
-  if (cloud === 'kept') return note('info', 'Ihre Cloud-Sicherung bleibt verbunden. ', 'Dieses Gerät war schon mit Ihrer Cloud-Sicherung verbunden; daran ändert die erneute Registrierung nichts.');
-  if (cloud === 'failed') return note('warning', 'Die Cloud-Sicherung konnte noch nicht angelegt werden. ', 'Der Dienst lässt es gerade nicht zu (z. B. zu viele Versuche). ParentsDay holt das Einrichten später automatisch nach – den Zustand sehen Sie oben in der Kopfzeile.');
+  if (cloud === 'kept') return note('info', 'Ihre Cloud-Sicherung bleibt verbunden. ', 'Dieses Gerät war schon mit Ihrer Cloud-Sicherung eingerichtet – Ihr Stand wird weiter damit abgeglichen.');
+  if (cloud === 'kept-other') {
+    return note(
+      'info',
+      'Das eingegebene Passwort wurde nicht übernommen. ',
+      'Dieses Gerät ist schon mit einer Cloud-Sicherung eingerichtet, die ein anderes Passwort hat. Ein neues Passwort legen Sie unter „Weitere Einstellungen“ fest. Wurde es inzwischen auf einem anderen Gerät geändert, geben Sie es nach „Weiter“ oben über „Passwort eingeben“ ein.',
+    );
+  }
+  if (cloud === 'failed') {
+    return note(
+      'warning',
+      'Die Cloud-Sicherung konnte noch nicht angelegt werden. ',
+      'Der Dienst lässt es gerade nicht zu (z. B. zu viele Versuche). ParentsDay holt das Einrichten später automatisch nach – den Zustand sehen Sie oben in der Kopfzeile. Bis dahin melden Sie sich an anderen Geräten mit Ihrem Registrierungscode an.',
+    );
+  }
   if (cloud === 'moved') {
     return note(
       'warning',
-      'Das Passwort dieser Cloud-Sicherung wurde inzwischen geändert. ',
-      'Mit dem eingegebenen Passwort gab es schon eine Cloud-Sicherung, sie hat aber ein neues Passwort. Geben Sie nach „Weiter“ oben über „Passwort eingeben“ das aktuelle Passwort ein.',
+      'Ihre Cloud-Sicherung wurde inzwischen geändert. ',
+      'Sie hat auf einem anderen Gerät ein neues Passwort bekommen oder wurde gelöscht. Geben Sie nach „Weiter“ oben über „Passwort eingeben“ das aktuelle Passwort ein.',
     );
   }
-  return note('info', 'Cloud-Sicherung eingerichtet. ', 'Die Cloud-Sicherung ist gerade nicht erreichbar – Ihr Stand wird hochgeladen, sobald eine Verbindung besteht.');
+  return note(
+    'info',
+    'Cloud-Sicherung eingerichtet. ',
+    'Die Cloud-Sicherung ist gerade nicht erreichbar – Ihr Stand wird hochgeladen, sobald eine Verbindung besteht. Bis dahin melden Sie sich an anderen Geräten mit Ihrem Registrierungscode an.',
+  );
 }
 
 function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed, cloud = '' }) {
@@ -528,7 +575,13 @@ function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed, cloud = '' 
       h(
         'div',
         { class: 'tauth-codes' },
-        codeBox('Ihr Registrierungscode', teacher.registrationCode, 'reg-registration-code', 'Zum Anmelden – zusammen mit Namen und Geburtsdatum.', true),
+        codeBox(
+          'Ihr Registrierungscode',
+          teacher.registrationCode,
+          'reg-registration-code',
+          cloudEnabled() ? 'Zum Anmelden ohne Passwort – zusammen mit Namen und Geburtsdatum.' : 'Zum Anmelden – zusammen mit Namen und Geburtsdatum.',
+          true,
+        ),
         codeBox('Ihr Lehrkräftecode', teacher.teacherCode, 'reg-teacher-code', 'Ihre persönliche Kennung. Sie steckt in den Codes Ihrer Schülerinnen und Schüler.', false),
       ),
       h(
@@ -603,7 +656,9 @@ function renderLogin(ctx) {
     }
   }
 
-  // Weg 2: Daten eingeben
+  // Weg 2: Daten eingeben – mit dem Passwort der Cloud-Sicherung (nur mit Dienst) oder dem Registrierungscode
+  const withPassword = cloudEnabled();
+  let mode = withPassword && loadLoginMode() !== 'code' ? 'password' : 'code';
   const f = {
     firstName: formField('Vorname', nameInput('login-firstname', 'given-name')),
     lastName: formField('Nachname', nameInput('login-lastname', 'family-name')),
@@ -613,15 +668,61 @@ function renderLogin(ctx) {
       input('login-code', { type: 'text', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', required: true, class: 'tauth-code-input' }),
       { hint: 'Steht in Ihrer Registrierungs-PDF, z. B. AM60127960.' },
     ),
+    password: withPassword
+      ? passwordField({
+          id: 'login-password',
+          label: 'Passwort',
+          hint: 'Das Passwort Ihrer Cloud-Sicherung – festgelegt bei der Registrierung oder beim Einrichten der Cloud-Sicherung.',
+          autocomplete: 'current-password',
+        })
+      : null,
   };
+  const intro = h('p', { class: 'muted', 'data-testid': 'login-data-intro' });
   const formStatus = h('div', { class: 'tauth-status', 'aria-live': 'polite' });
+  const submit = h('button', { type: 'submit', class: 'btn btn-primary', 'data-testid': 'login-submit' }, 'Anmelden');
+  // Während der Anmeldung lässt sich nicht umschalten (sonst passten Meldungen und gemerkter Weg nicht mehr).
+  const linkButton = (label, testId, onClick) =>
+    h('button', { type: 'button', class: 'link-button', 'data-testid': testId, onclick: (e) => e.detail > 1 || loggingIn || onClick() }, label);
+  const passwordLinks = withPassword
+    ? h(
+        'p',
+        { class: 'small tauth-login-links' },
+        linkButton('Passwort vergessen?', 'login-forgot', () => {
+          switchMode('code', { focus: true });
+          mount(formStatus, alertBox('info', h('p', { 'data-testid': 'login-forgot-note' }, FORGOT_PASSWORD)));
+        }),
+        ' · ',
+        linkButton('Ohne Passwort mit Registrierungscode anmelden', 'login-use-code', () => switchMode('code', { focus: true })),
+      )
+    : null;
+  const codeLinks = withPassword ? h('p', { class: 'small tauth-login-links' }, linkButton('Mit Passwort anmelden', 'login-use-password', () => switchMode('password', { focus: true }))) : null;
   const form = h(
     'form',
     { class: 'tauth-form', novalidate: true, onsubmit: onSubmit },
-    h('div', { class: 'form-grid' }, f.firstName.wrap, f.lastName.wrap, f.birthDate.wrap, f.code.wrap),
+    h('div', { class: 'form-grid' }, f.firstName.wrap, f.lastName.wrap, f.birthDate.wrap, f.code.wrap, f.password?.wrap),
+    passwordLinks,
+    codeLinks,
     formStatus,
-    h('div', { class: 'form-actions tauth-actions' }, h('button', { type: 'submit', class: 'btn btn-primary', 'data-testid': 'login-submit' }, 'Anmelden')),
+    h('div', { class: 'form-actions tauth-actions' }, submit),
   );
+
+  /** Passwort oder Registrierungscode – nur das jeweilige Feld ist zu sehen. */
+  function switchMode(next, { focus = false } = {}) {
+    mode = withPassword ? next : 'code';
+    const usePassword = mode === 'password';
+    f.code.wrap.hidden = usePassword;
+    if (f.password) f.password.wrap.hidden = !usePassword;
+    if (passwordLinks) passwordLinks.hidden = !usePassword;
+    if (codeLinks) codeLinks.hidden = usePassword;
+    f.code.setError('');
+    f.password?.setError('');
+    mount(formStatus);
+    intro.textContent = usePassword
+      ? 'Geben Sie Ihren Namen genau wie bei der Registrierung ein (auch mit Umlauten und Akzenten), dazu Ihr Geburtsdatum und Ihr Passwort. Ihr aktueller Stand wird dabei aus der Cloud-Sicherung geladen.'
+      : 'Geben Sie Ihren Namen genau wie bei der Registrierung ein (auch mit Umlauten und Akzenten), dazu Ihr Geburtsdatum und Ihren Registrierungscode.';
+    if (focus) (usePassword ? f.password.input : f.code.input).focus();
+  }
+  switchMode(mode);
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -632,34 +733,71 @@ function renderLogin(ctx) {
       lastName: f.lastName.input.value,
       birthDate: readDate(f.birthDate.input),
       code: f.code.input.value,
+      password: f.password ? f.password.input.value : '',
     };
+    const usePassword = mode === 'password';
     const ok = applyErrors([
       [f.firstName, nameError(values.firstName, 'Vornamen', 'Vorname')],
       [f.lastName, nameError(values.lastName, 'Nachnamen', 'Nachname')],
       [f.birthDate, birthDateError(f.birthDate.input)],
-      [f.code, normalizeCodeInput(values.code) ? '' : 'Bitte geben Sie Ihren Registrierungscode ein.'],
+      usePassword ? [f.password, values.password ? '' : 'Bitte geben Sie Ihr Passwort ein.'] : [f.code, normalizeCodeInput(values.code) ? '' : 'Bitte geben Sie Ihren Registrierungscode ein.'],
     ]);
     if (!ok) return;
-    let expected = '';
-    try {
-      expected = registrationCode(values.firstName, values.lastName, values.birthDate);
-    } catch {
-      expected = '';
-    }
-    if (!codesEqual(expected, values.code)) {
-      f.code.input.setAttribute('aria-invalid', 'true');
-      mount(formStatus, alertBox('error', h('p', {}, CODE_MISMATCH)));
-      f.code.input.focus();
-      return;
+    if (!usePassword) {
+      let expected = '';
+      try {
+        expected = registrationCode(values.firstName, values.lastName, values.birthDate);
+      } catch {
+        expected = '';
+      }
+      if (!codesEqual(expected, values.code)) {
+        f.code.input.setAttribute('aria-invalid', 'true');
+        mount(formStatus, alertBox('error', h('p', {}, CODE_MISMATCH)));
+        f.code.input.focus();
+        return;
+      }
     }
     loggingIn = true;
+    setBusy(submit, true, 'Bitte warten …');
     try {
-      await completeLogin(ctx, { firstName: values.firstName, lastName: values.lastName, birthDate: values.birthDate, email: '' }, { typed: true, onProgress: progress(formStatus) });
+      await completeLogin(
+        ctx,
+        { firstName: values.firstName, lastName: values.lastName, birthDate: values.birthDate, email: '' },
+        { typed: true, onProgress: progress(formStatus), password: usePassword ? values.password : '' },
+      );
+      if (withPassword) saveLoginMode(usePassword ? 'password' : 'code');
     } catch (err) {
-      mount(formStatus, alertBox('error', h('p', {}, 'Die Anmeldung hat nicht geklappt. ', friendlyError(err))));
+      if (usePassword) showPasswordError(err);
+      else mount(formStatus, alertBox('error', h('p', {}, 'Die Anmeldung hat nicht geklappt. ', friendlyError(err))));
     } finally {
       loggingIn = false;
+      if (submit.isConnected) setBusy(submit, false);
     }
+  }
+
+  /** Anmeldung mit Passwort gescheitert: Meldung am Feld bzw. Hinweis auf den Registrierungscode. */
+  function showPasswordError(err) {
+    if (err instanceof CloudNotFoundError) {
+      f.password.setError(err.moved ? MOVED_PASSWORD : WRONG_PASSWORD);
+      f.password.input.select();
+      return;
+    }
+    if (err instanceof MailboxError && err.status !== 429) {
+      const reason = err.offline
+        ? 'Die Cloud-Sicherung ist gerade nicht erreichbar – ohne sie lässt sich dieses Passwort nicht prüfen.'
+        : 'Die Anmeldung mit Passwort ist gerade nicht möglich.';
+      mount(
+        formStatus,
+        alertBox(
+          'warning',
+          h('p', { 'data-testid': 'login-password-unavailable' }, h('strong', {}, reason), ' Bitte melden Sie sich mit Ihrem Registrierungscode oder Ihrer Registrierungs-PDF an.'),
+          h('p', {}, linkButton('Mit Registrierungscode anmelden', 'login-unavailable-use-code', () => switchMode('code', { focus: true }))),
+        ),
+      );
+      return;
+    }
+    const message = err instanceof MailboxError ? cloudErrorMessage(err) : friendlyError(err);
+    mount(formStatus, alertBox('error', h('p', {}, 'Die Anmeldung hat nicht geklappt. ', message)));
   }
 
   mount(
@@ -692,7 +830,7 @@ function renderLogin(ctx) {
           { class: 'card tauth-way', 'aria-labelledby': 'tauth-way-data' },
           h('span', { class: 'tauth-eyebrow' }, 'Möglichkeit 2'),
           h('h2', { id: 'tauth-way-data' }, 'Mit Ihren Daten'),
-          h('p', { class: 'muted' }, 'Geben Sie Ihren Namen genau wie bei der Registrierung ein (auch mit Umlauten und Akzenten), dazu Ihr Geburtsdatum und Ihren Registrierungscode.'),
+          intro,
           form,
         ),
       ),
@@ -700,6 +838,22 @@ function renderLogin(ctx) {
       h('p', { class: 'tauth-alt small' }, 'Noch nicht registriert? ', h('a', { href: '#/lehrkraft/registrieren' }, 'Jetzt registrieren')),
     ),
   );
+}
+
+function loadLoginMode() {
+  try {
+    return localStorage.getItem(LOGIN_MODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLoginMode(mode) {
+  try {
+    localStorage.setItem(LOGIN_MODE_KEY, mode);
+  } catch {
+    // Speicher nicht zugänglich – beim nächsten Mal wieder mit Passwort
+  }
 }
 
 /**
@@ -748,16 +902,31 @@ async function isBackupFile(file) {
 /**
  * Meldet die Lehrkraft an. Legt einen leeren Zustand an, wenn auf diesem Gerät noch keiner existiert, und holt
  * mit dem Passwort den Stand aus der Cloud-Sicherung (bzw. bietet an, sie einzurichten).
- * @param {{typed?: boolean, onProgress?: (text: string) => void}} [opts] – typed: Namen wurden von Hand eingegeben
- *   (nicht aus der PDF gelesen); onProgress: Hinweis, solange die Cloud-Sicherung geprüft wird
+ * Mit `password` (Anmeldung mit Passwort) wird es zuerst geprüft: Ist es falsch, wirft completeLogin
+ * (CloudNotFoundError, MailboxError) – dann wird nichts gespeichert und niemand angemeldet.
+ * @param {{typed?: boolean, onProgress?: (text: string) => void, password?: string}} [opts]
+ *   typed: Namen wurden von Hand eingegeben (nicht aus der PDF gelesen); onProgress: Hinweis, solange die
+ *   Cloud-Sicherung geprüft wird
  */
-async function completeLogin(ctx, { firstName, lastName, birthDate, email }, { typed = false, onProgress } = {}) {
+async function completeLogin(ctx, { firstName, lastName, birthDate, email }, { typed = false, onProgress, password = '' } = {}) {
   // Von Hand eingegebene Namen werden nur für einen neuen Zustand gespeichert – dann ohne reine Kleinschreibung.
   const first = typed ? tidyName(firstName) : cleanName(firstName);
   const last = typed ? tidyName(lastName) : cleanName(lastName);
   const code = teacherCode(first, last, birthDate);
   let state = loadTeacherState(code);
   if (state && !isSameTeacher(state.teacher, first, last, birthDate)) throw new Error(CODE_COLLISION);
+  let login = null;
+  if (password) {
+    onProgress?.('Ihr Passwort wird geprüft …');
+    try {
+      login = await checkLoginPassword(state ? state.teacher : { firstName: first, lastName: last, birthDate, teacherCode: code }, password);
+    } finally {
+      onProgress?.('');
+    }
+    // Inzwischen in einem anderen Tab angelegt? Dann diesen Stand verwenden.
+    state = loadTeacherState(code);
+    if (state && !isSameTeacher(state.teacher, first, last, birthDate)) throw new Error(CODE_COLLISION);
+  }
   const created = !state;
   if (created) {
     state = saveTeacherState(
@@ -773,7 +942,7 @@ async function completeLogin(ctx, { firstName, lastName, birthDate, email }, { t
   let restored = false;
   if (cloudEnabled()) {
     try {
-      ({ restored } = await cloudAfterLogin(state.teacher, { onProgress }));
+      ({ restored } = login ? await cloudAfterPasswordLogin(state.teacher, login, { onProgress }) : await cloudAfterLogin(state.teacher, { onProgress }));
     } catch (err) {
       console.warn(err);
     }
