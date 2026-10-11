@@ -59,6 +59,7 @@ export default function render({ root, setTitle }) {
         withMailbox ? 'Verbindungen zu einem anderen Dienst gibt es nur zum Dienst für den digitalen Briefkasten und die Cloud-Sicherung. ' : null,
         'Es werden keine Cookies und keine Analyse-Werkzeuge verwendet.',
       ),
+      h('p', {}, h('a', { href: 'impressum.html' }, 'Impressum und vollständige Datenschutzerklärung')),
       h('p', {}, h('a', { href: '#/' }, 'Zur Startseite')),
     ),
   );
