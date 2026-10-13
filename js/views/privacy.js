@@ -33,7 +33,7 @@ export default function render({ root, setTitle }) {
           ? h('li', {}, 'Der Schlüssel zu Ihrem digitalen Briefkasten liegt in diesem Browser, in Ihrer Cloud-Sicherung und in Ihrem Zwischenspeicher. Ohne ihn lassen sich die Rückmeldungen im Briefkasten nicht lesen.')
           : null,
         withMailbox
-          ? h('li', {}, 'Auf gemeinsam genutzten Geräten wählen Sie beim Abmelden „Meine Daten von diesem Gerät entfernen“ und lassen das Passwort nicht merken.')
+          ? h('li', {}, 'Auf gemeinsam genutzten Geräten lassen Sie das Passwort nicht merken und entfernen Ihre Daten nach der Arbeit: Ist die Cloud-Sicherung verbunden, wählen Sie beim Abmelden „Meine Daten von diesem Gerät entfernen“; sonst speichern Sie vorher einen Zwischenstand und wählen unter „Weitere Einstellungen“ „Alle Daten in diesem Browser löschen“. Ist noch kein Elternsprechtag gespeichert, löschen Sie die Website-Daten dieser Seite im Browser.')
           : h('li', {}, 'Auf gemeinsam genutzten Geräten sollten Sie sich nach der Arbeit abmelden und die Browserdaten löschen.'),
       ),
       h('h2', {}, 'Eltern'),
@@ -79,10 +79,10 @@ function cloudSection() {
       h(
         'li',
         {},
-        'Um das Ausprobieren von Passwörtern zu verhindern, zählt der Dienst Versuche, eine Sicherung zu öffnen oder anzulegen (auch Anmeldungen mit falschem Passwort) – je Lehrkraft (anhand eines Hashwerts aus Name und Geburtsdatum, der nicht mit der Sicherung gespeichert wird) und Internetanschluss. Statt der IP-Adresse speichert er dafür einen pseudonymen Hashwert, der täglich wechselt; diese Zähler werden nach spätestens zwei Tagen gelöscht.',
+        'Um das Ausprobieren von Passwörtern zu verhindern, zählt der Dienst Versuche, eine Sicherung zu öffnen oder anzulegen (auch Anmeldungen mit falschem Passwort) – je Lehrkraft (anhand eines Hashwerts aus Name und Geburtsdatum, der nicht mit der Sicherung gespeichert wird) und Internetanschluss. Statt der IP-Adresse speichert er dafür einen pseudonymen Hashwert, der täglich wechselt; diese Zähler werden spätestens drei Tage nach dem letzten Versuch gelöscht.',
       ),
       h('li', {}, 'Die Lehrkraft kann die Cloud-Sicherung jederzeit unter „Weitere Einstellungen“ löschen. Wird sie 400 Tage weder geändert noch abgerufen, wird sie automatisch gelöscht – eine Sicherung, die nach dem Einrichten nie genutzt wurde, schon nach 30 Tagen.'),
-      h('li', {}, 'Ist das Passwort auf einem Gerät gemerkt, liegen die daraus berechneten Schlüssel im Speicher dieses Browsers – wie der Stand selbst auch. Zum Ändern des Passworts und zum Löschen der Sicherung ist immer das Passwort nötig.'),
+      h('li', {}, 'Die aus dem Passwort berechneten Schlüssel liegen bis zum Abmelden bzw. Schließen des Tabs im Speicher dieses Browsers, ist das Passwort auf dem Gerät gemerkt, dauerhaft – wie der Stand selbst auch. Zum Ändern des Passworts und zum Löschen der Sicherung ist immer das Passwort nötig.'),
     ),
   );
 }
@@ -103,7 +103,7 @@ function mailboxSection() {
       h(
         'li',
         {},
-        'Damit Eltern ohne QR-Code (mit dem Termin-Schlüssel aus dem Elternbrief) den Briefkasten finden, legt ParentsDay beim Erstellen der Elternbriefe die Angaben aus dem Brief verschlüsselt beim Dienst ab: Name, E-Mail-Adresse und Lehrkräftecode der Lehrkraft, Adresse der Schule, Klasse, Tage und Uhrzeiten. Öffnen lässt sich dieser Eintrag nur mit Lehrkräftecode, Klasse und Termin-Schlüssel; Eltern, die sich mit dem Termin-Schlüssel anmelden, rufen ihn ab. Namen von Kindern oder Eltern enthält er nicht. Wird er 200 Tage lang nicht mehr erneuert, wird er gelöscht.',
+        'Damit Eltern ohne QR-Code (mit dem Termin-Schlüssel aus dem Elternbrief) den Briefkasten finden, legt ParentsDay beim Erstellen der Elternbriefe die Angaben aus dem Brief verschlüsselt beim Dienst ab: Name, E-Mail-Adresse und Lehrkräftecode der Lehrkraft, Adresse der Schule, Klasse, Tage, Uhrzeiten und Terminlänge sowie Kennung und öffentlicher Schlüssel des digitalen Briefkastens. Öffnen lässt sich dieser Eintrag nur mit Lehrkräftecode, Klasse und Termin-Schlüssel; Eltern, die sich mit dem Termin-Schlüssel anmelden, rufen ihn ab. Namen von Kindern oder Eltern enthält er nicht. Wird er 200 Tage lang nicht mehr erneuert, wird er gelöscht.',
       ),
     ),
   );

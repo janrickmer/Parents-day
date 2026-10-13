@@ -43,8 +43,9 @@
 // Öffnen zählt nicht, Anlegen immer. Abgleichen von einem eingetragenen Gerät zählt nie. Abrufen, Speichern und
 // Löschen antworten bei jedem Fehler gleich (403) – ohne Passwort ist nicht zu erkennen, ob es eine Sicherung gibt.
 // Zum Zählen wird statt der IP-Adresse ein pseudonymer Hashwert gespeichert (HMAC mit IP_HASH_KEY bzw. täglich
-// neuem Zufallswert), nach spätestens 2 Tagen gelöscht. Sicherungen, die nach dem Anlegen nie geändert oder
-// abgerufen wurden, werden nach 30 Tagen gelöscht, alle anderen nach 400 Tagen ohne Änderung oder Abruf.
+// neuem Zufallswert), spätestens drei Tage nach dem letzten Versuch gelöscht. Sicherungen, die nach dem Anlegen
+// nie geändert oder abgerufen wurden, werden nach 30 Tagen gelöscht, alle anderen nach 400 Tagen ohne Änderung
+// oder Abruf.
 
 const DEFAULT_ORIGINS = ['https://parentsday.janrickmer.de'];
 const ID_RE = /^[A-Za-z0-9_-]{32}$/;
@@ -222,7 +223,8 @@ async function postMessage(request, env, db, boxId) {
  * Löscht Rückmeldungen und Verzeichniseinträge, die bald 200 Tage alt sind. Der Cron-Trigger läuft einmal
  * am Tag – mit einem Tag Vorlauf liegt so nichts länger als 200 Tage in der Datenbank.
  * Cloud-Sicherungen werden gelöscht, wenn sie 400 Tage weder geändert noch abgerufen wurden – oder schon nach
- * 30 Tagen, wenn sie nach dem Anlegen nie geändert oder abgerufen wurden (z. B. Müll von Fremden); Zähler nach 2 Tagen.
+ * 30 Tagen, wenn sie nach dem Anlegen nie geändert oder abgerufen wurden (z. B. Müll von Fremden); Zähler, deren
+ * Zeitraum älter als 2 Tage ist.
  */
 async function removeExpired(db, now = Date.now()) {
   const limit = now - (RETENTION_MS - DAY_MS);
