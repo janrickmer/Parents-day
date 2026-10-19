@@ -665,14 +665,29 @@ test('Smartphone: Nach dem Erzeugen der Codes sind Meldung und nächster Knopf z
     await page.locator(tid('primary-action')).scrollIntoViewIfNeeded();
     await page.tap(tid('primary-action'));
     await page.waitForFunction((sel) => document.querySelector(sel)?.textContent.includes('Elternschreiben'), tid('primary-action'));
-    await page.waitForTimeout(900); // sanftes Scrollen
-    const inView = await page.evaluate(() => {
+    // Sanftes Scrollen abwarten: Je nachdem, wo der Browser die Seite beim Höherwerden der Zeilen festhält, ist der Weg
+    // unterschiedlich lang und kann auch nach oben führen – deshalb auf das Ergebnis warten statt auf eine feste Zeit.
+    const inViewNow = () => {
       const visible = (el) => {
         const r = el.getBoundingClientRect();
         return r.top >= 0 && r.bottom <= window.innerHeight;
       };
       return { feedback: visible(document.querySelector('.tc-feedback')), button: visible(document.querySelector('[data-testid="primary-action"]')), focused: document.activeElement?.dataset.testid };
-    });
+    };
+    await page
+      .waitForFunction(
+        () => {
+          const visible = (el) => {
+            const r = el.getBoundingClientRect();
+            return r.top >= 0 && r.bottom <= window.innerHeight;
+          };
+          return visible(document.querySelector('.tc-feedback')) && visible(document.querySelector('[data-testid="primary-action"]'));
+        },
+        null,
+        { timeout: 4000 },
+      )
+      .catch(() => {}); // die Prüfung darunter zeigt, was nicht zu sehen ist
+    const inView = await page.evaluate(inViewNow);
     assert.deepEqual(inView, { feedback: true, button: true, focused: 'primary-action' });
     // Keine doppelte Meldung als Toast
     assert.equal(await page.locator('.toast', { hasText: 'Codes für' }).count(), 0);
