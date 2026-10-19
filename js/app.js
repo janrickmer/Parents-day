@@ -186,7 +186,7 @@ function footer() {
   return h(
     'footer',
     { class: 'site-footer' },
-    h('div', { class: 'container footer-inner' }, h('span', {}, h('span', { class: 'footer-name' }, APP_NAME), ' – Elternsprechtage einfach organisieren'), h('a', { href: '#/datenschutz' }, 'Datenschutz-Hinweise')),
+    h('div', { class: 'container footer-inner' }, h('span', {}, h('span', { class: 'footer-name' }, APP_NAME), ' – Elternsprechtage einfach organisieren'), h('a', { href: 'impressum.html', target: '_blank', rel: 'noopener' }, 'Impressum & Datenschutz')),
   );
 }
 

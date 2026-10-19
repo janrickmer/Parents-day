@@ -140,6 +140,7 @@ Tests: `tests/unit/cloud.test.mjs` (Schlüsselableitung aus Passwort und Person,
 | `js/core/cloud-sync.js` | Cloud-Sicherung: Abgleich im Hintergrund, Einstellungen und Schlüssel auf dem Gerät, Einrichten, Entsperren, Passwort ändern, Löschen |
 | `worker/` | Dienst für Cloudflare: Briefkasten und Cloud-Sicherung (`briefkasten.js`, `wrangler.toml`) – gehört nicht zur Web-App, sondern wird bei Cloudflare eingerichtet |
 | `js/components/` | wiederverwendbare Bausteine (`calendar-picker.js`, `response-import.js`, `backup-actions.js` für „Zwischenstand speichern/laden“, `cloud-ui.js` für Dialoge, Kopfzeilen-Anzeige und Karte der Cloud-Sicherung) |
+| `impressum.html` | Impressum und vollständige Datenschutzerklärung als eigene statische Seite (in der Fußzeile verlinkt); Stil aus `css/base.css` und `css/impressum.css`, eigene Content-Security-Policy ohne Skripte |
 | `404.html` | GitHub Pages liefert sie für unbekannte Pfade (z. B. `/eltern`) und leitet auf die Hash-Adresse (`/#/eltern`) weiter |
 | `js/views/` | eine Datei pro Seite (siehe Routen) |
 | `js/pdf/` | eine Datei pro PDF-Art |
@@ -148,7 +149,7 @@ Tests: `tests/unit/cloud.test.mjs` (Schlüsselableitung aus Passwort und Person,
 | `vendor/` | jsPDF 4.2.1 (UMD), qrcode-generator 2.0.4 (ESM) – lokal, kein CDN |
 | `fonts/` | Barlow und Barlow Condensed (SIL OFL 1.1, `woff2`, Teilmengen latin und latin-ext) für die Oberfläche; Liberation Sans (SIL OFL 1.1) für PDFs |
 | `img/start/` | Bilder der Startseite: echte Bildschirmfotos von ParentsDay mit Beispieldaten und Ausschnitte aus den erzeugten PDFs (`webp`), daneben je eine Begleitdatei `<bild>.webp.json` mit der Herkunft; neu aufnehmen mit `node tools/startseite-bilder.mjs` |
-| `tools/` | `startseite-bilder.mjs`: nimmt die Bilder in `img/start/` gegen den lokalen Testserver (ohne Briefkasten) neu auf |
+| `tools/` | `startseite-bilder.mjs`: nimmt die Bilder in `img/start/` gegen den lokalen Testserver neu auf; den Elternbrief mit Briefkasten mit einer Briefkasten-Adresse, die nirgends hinführt (`brief*.webp`, `elternbrief*.webp`: ohne Endung mit Briefkasten, `-email` ohne) |
 | `PRODUCT.md`, `DESIGN.md` | Produkt- und Gestaltungsgrundlagen (Zielgruppen, Grundsätze; Farben, Schrift, Bausteine des Erscheinungsbilds) |
 | `tests/unit/` | `node --test` für Kernlogik (`npm test`), darunter `cloud.test.mjs` für Schlüssel, Verschlüsselung und Endpunkte der Cloud-Sicherung |
 | `tests/e2e/` | Browser-Tests mit Playwright/Chromium (`npm run test:e2e`), Hilfen in `helpers.mjs`, lokaler Briefkasten in `mailbox-server.mjs`, Cloud-Sicherung mit zwei Geräten in `cloud.test.mjs`, Anmeldung mit Passwort in `cloud-login.test.mjs` (gemeinsame Hilfen in `cloud-helpers.mjs`) |
