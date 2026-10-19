@@ -327,6 +327,9 @@ test('Gesamtablauf mit digitalem Briefkasten: Absenden per Briefkasten, Notlösu
     assert.ok(!JSON.stringify(stored).includes('Beck') && !JSON.stringify(stored).includes(letterOf.Anna.code), 'Dienst sieht keine Namen oder Codes');
 
     // ---------- Lehrkraft: automatischer Abruf beim Öffnen der Klasse ----------
+    // Vorher die Cloud-Sicherung abschließen: Ein Hochladen, das beim Verlassen der Seite noch läuft, kennt die neu
+    // geladene Seite nicht; ihr nächstes Hochladen bekäme 409 (still aufgelöst, aber als Fehler in der Konsole).
+    await page.evaluate(() => import('./js/core/cloud-sync.js').then((m) => m.flushCloudSync()));
     await page.reload();
     const avail = async (i) => flat(await rows.nth(i).locator(tid('student-availability')).textContent());
     await rows.nth(1).locator(tid('student-availability')).filter({ hasText: '15:00–16:00' }).waitFor();
