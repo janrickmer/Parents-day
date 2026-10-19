@@ -87,7 +87,8 @@ const SAMPLE_MAILBOX = { id: 'Beispiel'.repeat(4), publicKey: 'Beispiel'.repeat(
 const shotPng = (name) => path.join(raw, `${name}.png`);
 
 /** PNG → WebP in Zielgröße (über ein Canvas im Browser). fit 'cover' schneidet mittig zu, 'top' setzt das Bild
- *  oben in voller Breite ein und füllt den Rest weiß (für PDF-Ausschnitte, damit kein Text angeschnitten wird). */
+ *  oben in voller Breite ein und füllt den Rest weiß (für PDF-Ausschnitte, damit kein Text angeschnitten wird),
+ *  'center' zeigt es ganz, mittig auf der Farbe seines Randes (für ganze Bausteine einer Seite). */
 async function toWebp(page, pngFile, webpFile, width, height, quality = 0.86, fit = 'cover') {
   const b64 = (await fs.readFile(pngFile)).toString('base64');
   const data = await page.evaluate(
@@ -102,7 +103,18 @@ async function toWebp(page, pngFile, webpFile, width, height, quality = 0.86, fi
       ctx.imageSmoothingQuality = 'high';
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, w, h);
-      if (mode === 'top') {
+      if (mode === 'center') {
+        // Ganz zeigen, mittig auf der Farbe des Bildrands (oben links)
+        const probe = document.createElement('canvas');
+        probe.width = probe.height = 1;
+        const pctx = probe.getContext('2d');
+        pctx.drawImage(img, 0, 0, 1, 1, 0, 0, 1, 1);
+        const [r, g, b] = pctx.getImageData(0, 0, 1, 1).data;
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(0, 0, w, h);
+        const s = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+        ctx.drawImage(img, (w - img.naturalWidth * s) / 2, (h - img.naturalHeight * s) / 2, img.naturalWidth * s, img.naturalHeight * s);
+      } else if (mode === 'top') {
         const s = Math.min(w / img.naturalWidth, h / img.naturalHeight);
         ctx.drawImage(img, (w - img.naturalWidth * s) / 2, 0, img.naturalWidth * s, img.naturalHeight * s);
       } else {
@@ -146,7 +158,6 @@ const state = richState();
 {
   const page = await newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
   const box = async (sel) => page.locator(sel).first().boundingBox();
-  // Ausschnitt im Seitenformat 4:5; Koordinaten auf die ganze Seite bezogen (fullPage), damit nichts am Fensterrand abreißt
   // Ausschnitt im Hochformat 4:5. Ein Baustein, der im unteren Teil des Ausschnitts beginnt und von der Unterkante
   // durchschnitten würde (das nächste Feld, ein Eintrag der Tabelle, ein Zeitslot), wird für die Aufnahme ganz
   // ausgeblendet; vom Inhalt darüber nur angeschnittene Textzeilen und Bilder. So endet jedes Bild auf ganzen
@@ -190,6 +201,16 @@ const state = richState();
     });
   };
 
+  // Einen ganzen Baustein aufnehmen (Vereinigung aller Treffer der Selektoren, mit Rand); das WebP setzt ihn später
+  // mittig auf die Farbe seines Randes – so zeigt jede Karte etwas Vollständiges statt eines Anschnitts.
+  const shotBlock = async (name, selectors, pad) => {
+    const r = await page.evaluate((sels) => {
+      const rects = sels.flatMap((sel) => [...document.querySelectorAll(sel)].map((el) => el.getBoundingClientRect()));
+      return { x: Math.min(...rects.map((b) => b.left)), y: Math.min(...rects.map((b) => b.top)) + window.scrollY, right: Math.max(...rects.map((b) => b.right)), bottom: Math.max(...rects.map((b) => b.bottom)) + window.scrollY };
+    }, selectors);
+    await page.screenshot({ path: shotPng(name), fullPage: true, clip: { x: r.x - pad, y: r.y - pad, width: r.right - r.x + 2 * pad, height: r.bottom - r.y + 2 * pad }, animations: 'disabled' });
+  };
+
   // Registrierung abschließen → Codes
   await page.goto(`${web.url}#/lehrkraft/registrieren`);
   await page.locator('[data-testid="reg-firstname"]').waitFor();
@@ -215,30 +236,25 @@ const state = richState();
   await page.locator('.calp-grid').first().waitFor();
   await settle(page);
   await page.screenshot({ path: shotPng('einstellungen-voll'), fullPage: true, animations: 'disabled' });
-  {
-    const b = await box('.calp');
-    await clip45('kalender', b.x - 12, b.y - 12, b.width + 24);
-  }
+  await shotBlock('kalender', ['.calp'], 12);
 
   // Schmales Fenster: die Klassen stehen untereinander, ein Türschild füllt die Breite
   await page.setViewportSize({ width: 452, height: 1000 });
   await page.goto(`${web.url}#/lehrkraft/klassen`);
   await page.locator('[data-testid="class-tile-5a"]').waitFor();
   await settle(page);
-  {
-    const b = await box('.tcl-classes-title');
-    await clip45('klassen', 0, b.y - 16, 452);
-  }
+  await shotBlock('klassen', ['.tcl-classes-title', '[data-testid^="class-tile-"]'], 16);
 
   // Smartphone-Breite: jede Zeile der Tabelle als kleine Karte mit Code und freien Zeiten
   await page.setViewportSize({ width: 436, height: 1000 });
   await page.goto(`${web.url}#/lehrkraft/klasse/5a`);
   await page.locator('.tc-table').waitFor();
   await settle(page);
-  {
-    const b = await box('.tc-table-wrap');
-    await clip45('tabelle', 0, b.y - 10, 436);
-  }
+  // Nur die ersten beiden Einträge, die Tabelle endet danach
+  await page.evaluate(() => {
+    for (const tr of [...document.querySelectorAll('.tc-table tbody tr')].slice(2)) tr.style.display = 'none';
+  });
+  await shotBlock('tabelle', ['.tc-table-wrap'], 12);
 
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.goto(`${web.url}#/lehrkraft/klasse/5a/terminieren`);
@@ -324,7 +340,7 @@ if 'cover' in modes:
                     key = pymupdf.Rect(sp['bbox']) if key is None else key | pymupdf.Rect(sp['bbox'])
     if key is None:
         raise SystemExit('Termin-Schlüssel im Elternbrief nicht gefunden')
-    cover_with_label(key + (1, -1, 2, 1), 8)
+    cover_with_label(key + (-0.5, -1, 2, 1), 8)
 if 'steps' in modes:
     # Hochformat 4:5 ab „So geht’s“, höchstens bis über die Fußzeile
     y0 = line_starting('So geht')[0].y0 - 10
@@ -362,10 +378,10 @@ print(json.dumps(marks))
     execFileSync('python3', ['-c', pdfScript, path.join(raw, pdf), shotPng(png), String(pageIndex), String(x0), String(y0), String(x1), String(y1), mode || '-'], { encoding: 'utf8' });
   const pt = (px) => (px * 72) / 100; // Koordinaten aus der 100-dpi-Ansicht
   const lastPage = (pdf) => Number(execFileSync('python3', ['-c', 'import sys, pymupdf; print(len(pymupdf.open(sys.argv[1])) - 1)', path.join(raw, pdf)], { encoding: 'utf8' }).trim());
-  // Karussell: die Schritte, der gelbe Kasten und der Termin-Schlüssel; Übersicht für die Lehrkraft (letzte Seite
-  // der Termin-PDF). Ränder liegen zwischen Textzeilen bzw. Tabellenspalten, nie mitten im Wort
-  crop('elternbrief.pdf', 'elternbrief', 0, pt(70), 0, pt(570), 0, 'cover,steps');
-  crop('elternbrief-email.pdf', 'elternbrief-email', 0, pt(70), 0, pt(570), 0, 'cover,steps');
+  // Karussell: die Schritte, der gelbe Kasten und der Termin-Schlüssel in ganzer Textbreite; Übersicht für die
+  // Lehrkraft (letzte Seite der Termin-PDF). Ränder liegen zwischen Textzeilen bzw. Tabellenspalten, nie mitten im Wort
+  crop('elternbrief.pdf', 'elternbrief', 0, pt(60), 0, pt(760), 0, 'cover,steps');
+  crop('elternbrief-email.pdf', 'elternbrief-email', 0, pt(60), 0, pt(760), 0, 'cover,steps');
   crop('terminbestaetigung.pdf', 'terminbestaetigung', lastPage('terminbestaetigung.pdf'), pt(70), pt(225), pt(560), pt(660));
   // Abschnitt „Jede Familie hat ihren Termin“: die erste Terminbestätigung in ganzer Breite
   crop('terminbestaetigung.pdf', 'bestaetigung', 0, pt(60), pt(130), pt(760), pt(130 + 725));
@@ -408,8 +424,11 @@ print(json.dumps(marks))
 // ---------- Zuschnitte als WebP ----------
 const cp = await browser.newPage({ viewport: { width: 800, height: 600 } });
 await cp.goto(web.url);
-for (const name of ['registriert', 'kalender', 'klassen', 'tabelle', 'terminieren', 'eltern-zeiten']) {
+for (const name of ['registriert', 'terminieren', 'eltern-zeiten']) {
   await toWebp(cp, shotPng(name), path.join(out, `${name}.webp`), 680, 850);
+}
+for (const name of ['kalender', 'klassen', 'tabelle']) {
+  await toWebp(cp, shotPng(name), path.join(out, `${name}.webp`), 680, 850, 0.86, 'center');
 }
 for (const name of ['elternbrief', 'elternbrief-email', 'terminbestaetigung']) {
   await toWebp(cp, shotPng(name), path.join(out, `${name}.webp`), 680, 850, 0.86, 'top');

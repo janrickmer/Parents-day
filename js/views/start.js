@@ -233,7 +233,7 @@ function appointmentPlate([time, name], i) {
 function stations(withMailbox) {
   return [
     ['Zuerst registrieren', 'Name, Geburtsdatum und E-Mail-Adresse eintragen. Sie erhalten sofort eine PDF-Datei mit Ihrem Registrierungscode.', 'registriert', 'Registrierung abgeschlossen: Registrierungscode und Lehrkräftecode in gelben Kästen'],
-    ['Dann den Tag anlegen', 'Tage im Kalender antippen, Uhrzeiten, Adresse der Schule und Terminlänge festlegen.', 'kalender', 'Kalender mit zwei ausgewählten Tagen und den Uhrzeiten daneben'],
+    ['Dann den Tag anlegen', 'Tage im Kalender antippen, Uhrzeiten, Adresse der Schule und Terminlänge festlegen.', 'kalender', 'Kalender mit zwei ausgewählten Tagen im November'],
     ['Klassen anlegen', 'Jede Klasse bekommt ein eigenes Schild und zeigt, wie weit sie ist.', 'klassen', 'Klassenübersicht mit Schildern für die Klassen 5a, 7c und 9b'],
     ['Lernende eintragen', 'Namen eintippen oder aus einer Liste einfügen. Für jedes Kind entsteht ein Code.', 'tabelle', 'Tabelle der Lernenden mit Codes und den freien Zeiten der Eltern'],
     ['Briefe mitgeben', 'Ein DIN-A4-Blatt pro Kind, mit QR-Code und dem gelben Kasten zum Anmelden.', withMailbox ? 'elternbrief' : 'elternbrief-email', 'Ausschnitt aus einem Elternbrief mit dem gelben Kasten'],
