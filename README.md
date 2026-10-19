@@ -93,3 +93,4 @@ Weitere Unterlagen:
 * QR Code Generator von Kazuhiko Arase (MIT): `vendor/LICENSE-qrcode-generator.txt`
 * Liberation Sans (SIL Open Font License 1.1): `fonts/LICENSE-LiberationSans.txt`
 * Barlow und Barlow Condensed (SIL Open Font License 1.1): `fonts/LICENSE-Barlow.txt`
+* Fotos der Startseite: Lukas Beck, [„Berlin Louise-Schroeder-Schule lub 2024-01-20 img08 Interieur“](https://commons.wikimedia.org/wiki/File:Berlin_Louise-Schroeder-Schule_lub_2024-01-20_img08_Interieur.jpg) (`img/start/flur.webp`: retuschiert, verkleinert, in Graustufen) und [„… img06 Interieur“](https://commons.wikimedia.org/wiki/File:Berlin_Louise-Schroeder-Schule_lub_2024-01-20_img06_Interieur.jpg) (`img/start/flur-tuer.webp`: Ausschnitt, retuschiert, in Graustufen), Wikimedia Commons, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); aufbereitet mit `tools/startseite-fotos.mjs`

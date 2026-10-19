@@ -87,16 +87,17 @@
 
 /* ---------- Erster Bildschirm: Petrol-Wand mit Schild und Türliste ---------- */
 
-.start-hero {
-  position: relative;
-  background: var(--c-wall);
-  color: #fff;
-  overflow: hidden;
-}
+/* Hinter Tafel und Türliste ein Schulflur: Graustufen-Foto, mit der Petrol-Wand multipliziert (Herkunft in
+   img/start/flur.webp.json, Bildnachweis im Abschluss der Seite) */
 .start-hero {
   --hero-pad-top: clamp(28px, 4vw, 56px);
   --hero-pad-bottom: clamp(64px, 8vw, 112px);
+  position: relative;
   padding-block: var(--hero-pad-top) var(--hero-pad-bottom);
+  background: var(--c-wall) url('../../img/start/flur.webp') 48% 45% / cover no-repeat;
+  background-blend-mode: multiply;
+  color: #fff;
+  overflow: hidden;
 }
 .start-hero-grid {
   display: grid;
@@ -617,7 +618,6 @@
 .start-letter {
   background: var(--c-accent);
   color: var(--c-ink);
-  view-timeline-name: --letter;
 }
 .start-letter-grid {
   display: grid;
@@ -800,7 +800,8 @@
 /* ---------- Abschluss: der Name in voller Breite auf der Petrol-Wand ---------- */
 
 .start-close {
-  background: var(--c-wall);
+  background: var(--c-wall) url('../../img/start/flur-tuer.webp') 30% 55% / cover no-repeat;
+  background-blend-mode: multiply;
   color: #fff;
 }
 .start-close-name {
@@ -817,58 +818,46 @@
   font-size: clamp(1.25rem, 2vw, 1.75rem);
   color: var(--c-wall-muted);
 }
+.start-photo-credit {
+  margin: clamp(56px, 8vw, 96px) 0 0;
+  max-width: 68ch;
+  color: var(--c-wall-muted);
+  font-size: 0.875rem;
+}
+.start-photo-credit a {
+  color: inherit;
+}
+.start-photo-credit a:hover {
+  color: #fff;
+}
 .start-signs-close {
   margin-top: clamp(28px, 4vw, 48px);
 }
 
 /* ---------- Erscheinen beim Laden und Scrollen ----------
    Nur mit Bewegung und nur mit Skript (sonst ist alles sofort sichtbar). Überall dieselbe ruhige Art; eigens
-   inszeniert sind nur das Einrasten in der Türliste und der angeheftete Brief. */
+   inszeniert ist nur das Einrasten in der Türliste. */
 
 .start-motion [data-rise] {
   opacity: 0;
   transform: translateY(16px);
   transition:
     opacity 600ms var(--ease-out),
-    transform 600ms var(--ease-out),
-    clip-path 1000ms var(--ease-in-out);
+    transform 600ms var(--ease-out);
   transition-delay: calc(var(--i, 0) * 60ms + 40ms);
 }
 .start-motion .is-in [data-rise] {
   opacity: 1;
   transform: none;
 }
-/* Brief: öffnet sich von oben wie ein Blatt, das aus dem Umschlag kommt */
-.start-motion .start-letter .start-letter-figure[data-rise] {
-  transform: none;
-  clip-path: inset(0 0 100% 0);
-}
-.start-motion .start-letter.is-in .start-letter-figure[data-rise] {
-  clip-path: inset(0);
-}
-
-/* Langsame Bewegung des Briefs, solange der Abschnitt durchscrollt wird */
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .start-letter-sheet {
-      animation: start-letter-drift linear both;
-      animation-timeline: --letter;
-      animation-range: cover 10% cover 90%;
-    }
-  }
-}
-@keyframes start-letter-drift {
-  from {
-    transform: scale(1);
-  }
-  to {
-    transform: scale(1.045);
-  }
-}
-
 /* Ohne Bewegung und beim Drucken ist alles sofort sichtbar */
-/* Hoher Kontrast: Farbfelder und Termine der Türliste behalten ihre Fachfarben, die gewählte Familie ihren Rahmen */
+/* Hoher Kontrast: ohne Fotos; Farbfelder und Termine der Türliste behalten ihre Fachfarben, die gewählte Familie
+   ihren Rahmen */
 @media (forced-colors: active) {
+  .start-hero,
+  .start-close {
+    background-image: none;
+  }
   [data-ui] .dp-sw,
   [data-ui] .dp-entry {
     forced-color-adjust: none;
@@ -883,14 +872,12 @@
   .start-motion [data-rise] {
     opacity: 1 !important;
     transform: none !important;
-    clip-path: none !important;
   }
 }
 @media print {
   .start-motion [data-rise] {
     opacity: 1 !important;
     transform: none !important;
-    clip-path: none !important;
   }
   .start-letter-pin {
     position: static;
@@ -911,10 +898,9 @@
   .start-title {
     font-size: clamp(2.5rem, 8.2vw, 4.5rem);
   }
+  /* Einspaltig steht die Türliste so breit wie die Tafel darüber */
   .start-hero-side {
     width: 100%;
-    max-width: 460px;
-    justify-self: end;
   }
   /* Einspaltig wird der Flügelstreifen zum waagerechten Band zwischen Tafel und Türliste */
   .start-wing {

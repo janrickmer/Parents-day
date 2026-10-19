@@ -1,14 +1,8 @@
-/* Impressum & Datenschutz (impressum.html): ein weißes Schild an der Petrol-Wand, wie die übrigen Leseseiten.
-   Schriften, Farben, Links und Fokus kommen aus base.css. */
-body::before {
-  content: '';
-  display: block;
-  height: 96px;
-  background: var(--c-wall);
-}
+/* Impressum & Datenschutz (impressum.html): Kopfzeile wie in der App, darunter ein weißes Schild an der Flurwand
+   wie die übrigen Leseseiten. Schriften, Farben, Links und Fokus kommen aus base.css. */
 main {
   max-width: 780px;
-  margin: -56px auto 64px;
+  margin: 32px auto 64px;
   padding: clamp(24px, 4vw, 52px);
   border-radius: var(--radius);
   background: var(--c-surface);
@@ -76,9 +70,6 @@ li {
   font-size: 0.92rem;
 }
 @media print {
-  body::before {
-    display: none;
-  }
   main {
     margin: 0;
     padding: 0;

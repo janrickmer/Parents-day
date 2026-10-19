@@ -147,9 +147,47 @@ const state = richState();
   const page = await newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
   const box = async (sel) => page.locator(sel).first().boundingBox();
   // Ausschnitt im Seitenformat 4:5; Koordinaten auf die ganze Seite bezogen (fullPage), damit nichts am Fensterrand abreißt
+  // Ausschnitt im Hochformat 4:5. Ein Baustein, der im unteren Teil des Ausschnitts beginnt und von der Unterkante
+  // durchschnitten würde (das nächste Feld, ein Eintrag der Tabelle, ein Zeitslot), wird für die Aufnahme ganz
+  // ausgeblendet; vom Inhalt darüber nur angeschnittene Textzeilen und Bilder. So endet jedes Bild auf ganzen
+  // Bausteinen statt auf halben Zeilen oder Kästen.
   const clip45 = async (name, x, y, w) => {
-    const sy = await page.evaluate(() => window.scrollY);
-    await page.screenshot({ path: shotPng(name), fullPage: true, clip: { x, y: y + sy, width: w, height: (w * 5) / 4 }, animations: 'disabled' });
+    const h = (w * 5) / 4;
+    const sy = await page.evaluate(
+      ([top, cut]) => {
+        const box = (el) => el.getBoundingClientRect();
+        const crosses = (r) => r.width > 0 && r.height > 0 && r.top < cut && r.bottom > cut;
+        const lower = top + (cut - top) * 0.25;
+        const hide = new Set();
+        for (const el of document.querySelectorAll('body *')) {
+          const r = box(el);
+          if (!crosses(r)) continue;
+          if (r.top > lower) {
+            let block = el;
+            while (block.parentElement && block.parentElement !== document.body && box(block.parentElement).top > lower) block = block.parentElement;
+            hide.add(block);
+            continue;
+          }
+          let hit = el.matches('img, svg, input, select, textarea, canvas');
+          for (const n of el.childNodes) {
+            if (hit) break;
+            if (n.nodeType !== Node.TEXT_NODE || !n.textContent.trim()) continue;
+            const range = document.createRange();
+            range.selectNodeContents(n);
+            hit = [...range.getClientRects()].some(crosses);
+          }
+          if (hit) hide.add(el);
+        }
+        window.__clipHidden = [...hide];
+        for (const el of window.__clipHidden) el.style.visibility = 'hidden';
+        return window.scrollY;
+      },
+      [y, y + h],
+    );
+    await page.screenshot({ path: shotPng(name), fullPage: true, clip: { x, y: y + sy, width: w, height: h }, animations: 'disabled' });
+    await page.evaluate(() => {
+      for (const el of window.__clipHidden) el.style.visibility = '';
+    });
   };
 
   // Registrierung abschließen → Codes
@@ -315,7 +353,7 @@ right = qr_cover.x0 if qr_cover else 400
 for r, t, spans in lines:
     if r.y0 >= four.y0 and (box_top is None or r.y1 <= box_top) and r.x0 < right:
         send |= r
-marks['send'] = pct(send + (-3, -3, 3, 3))
+marks['send'] = pct(send + (-3, -3, 9, 3))  # rechts etwas Luft: der Rahmen soll das letzte Wort nicht berühren
 if qr_cover:
     marks['qr'] = pct(qr_cover + (-3, -3, 3, 3))
 print(json.dumps(marks))

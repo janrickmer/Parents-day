@@ -306,8 +306,8 @@ function letterSteps(withMailbox) {
 // Stellen im Elternbrief als [links, oben, Breite, Höhe] in % des Bildes, ausgegeben von tools/startseite-bilder.mjs.
 // Der Brief mit Briefkasten hat einen anderen Schritt 4 und steht deshalb etwas anders.
 const LETTER_MARKS = {
-  brief: { qr: [74.9, 33.2, 24.3, 18.4], box: [2.3, 61.9, 96.4, 18.1], times: [2.3, 21.4, 96.4, 10.5], send: [2.6, 52.3, 69.9, 8.2] },
-  'brief-email': { qr: [76.1, 36.2, 23, 17.5], box: [2.3, 63.8, 96.4, 18.4], times: [2.3, 23.7, 96.4, 11.1], send: [2.6, 57.2, 60.6, 5] },
+  brief: { qr: [74.9, 33.2, 24.3, 18.4], box: [2.3, 61.9, 96.4, 18.1], times: [2.3, 21.4, 96.4, 10.5], send: [2.6, 52.3, 71.1, 8.2] },
+  'brief-email': { qr: [76.1, 36.2, 23, 17.5], box: [2.3, 63.8, 96.4, 18.4], times: [2.3, 23.7, 96.4, 11.1], send: [2.6, 57.2, 61.8, 5] },
 };
 
 function letterStory(withMailbox) {
@@ -343,6 +343,25 @@ function letterStory(withMailbox) {
     steps.forEach((s) => io.observe(s));
   }
   return { figure, list, cleanup: () => io?.disconnect() };
+}
+
+// ---------- Bildnachweis der Fotos (erster Bildschirm und Abschluss) ----------
+
+const COMMONS = 'https://commons.wikimedia.org/wiki/File:Berlin_Louise-Schroeder-Schule_lub_2024-01-20_';
+
+function photoCredit() {
+  const link = (href, text) => h('a', { href, rel: 'noopener' }, text);
+  return h(
+    'p',
+    { class: 'start-photo-credit' },
+    'Fotos: Lukas Beck, Flure der Louise-Schroeder-Schule in Berlin (Wikimedia Commons: ',
+    link(`${COMMONS}img08_Interieur.jpg`, 'Flur'),
+    ', ',
+    link(`${COMMONS}img06_Interieur.jpg`, 'Tür'),
+    '), Lizenz ',
+    link('https://creativecommons.org/licenses/by/4.0/deed.de', 'CC BY 4.0'),
+    '; bearbeitet: retuschiert, Ausschnitt (Tür), in Graustufen und eingefärbt.',
+  );
 }
 
 // ---------- Fragen ----------
@@ -484,6 +503,7 @@ export default function render({ root, setTitle }) {
       rise(h('p', { class: 'start-close-name', id: 'start-close-title' }, 'ParentsDay'), 0),
       rise(h('p', { class: 'start-close-line' }, 'Für den nächsten Elternsprechtag.'), 1),
       rise(h('div', { class: 'start-signs start-signs-close' }, sign('#/lehrkraft', 'Zugang für Lehrkräfte', 'teacher'), sign('#/eltern', 'Zugang für Eltern', 'parent')), 2),
+      photoCredit(),
     ),
   );
 
