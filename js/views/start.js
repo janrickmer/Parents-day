@@ -244,7 +244,7 @@ function stations(withMailbox) {
       'terminieren',
       'Tagesansicht mit blauen, orangen und roten Terminen',
     ],
-    ['Termine drucken', 'Eine Terminbestätigung für jede Familie und eine Übersicht für Sie.', 'terminbestaetigung', 'Ausschnitt aus einer Terminbestätigung'],
+    ['Termine drucken', 'Eine Terminbestätigung für jede Familie und eine Übersicht für Sie.', 'terminbestaetigung', 'Übersicht der Gesprächstermine für die Lehrkraft mit beiden Tagen'],
   ];
 }
 
