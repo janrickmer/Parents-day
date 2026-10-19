@@ -135,6 +135,18 @@ async function toWebp(page, pngFile, webpFile, width, height, quality = 0.86, fi
   await fs.writeFile(webpFile, Buffer.from(data, 'base64'));
 }
 
+/**
+ * Einen ganzen Baustein aufnehmen (Vereinigung aller Treffer der Selektoren, mit Rand); das WebP setzt ihn später
+ * mittig auf die Farbe seines Randes – so zeigt jede Karte etwas Vollständiges statt eines Anschnitts.
+ */
+async function captureBlock(page, name, selectors, pad) {
+  const r = await page.evaluate((sels) => {
+    const rects = sels.flatMap((sel) => [...document.querySelectorAll(sel)].map((el) => el.getBoundingClientRect()));
+    return { x: Math.min(...rects.map((b) => b.left)), y: Math.min(...rects.map((b) => b.top)) + window.scrollY, right: Math.max(...rects.map((b) => b.right)), bottom: Math.max(...rects.map((b) => b.bottom)) + window.scrollY };
+  }, selectors);
+  await page.screenshot({ path: shotPng(name), fullPage: true, clip: { x: r.x - pad, y: r.y - pad, width: r.right - r.x + 2 * pad, height: r.bottom - r.y + 2 * pad }, animations: 'disabled' });
+}
+
 /** Ruhige Aufnahme: Animationen beendet, Schrift geladen. */
 async function settle(page) {
   await page.evaluate(() => document.fonts.ready);
@@ -201,15 +213,7 @@ const state = richState();
     });
   };
 
-  // Einen ganzen Baustein aufnehmen (Vereinigung aller Treffer der Selektoren, mit Rand); das WebP setzt ihn später
-  // mittig auf die Farbe seines Randes – so zeigt jede Karte etwas Vollständiges statt eines Anschnitts.
-  const shotBlock = async (name, selectors, pad) => {
-    const r = await page.evaluate((sels) => {
-      const rects = sels.flatMap((sel) => [...document.querySelectorAll(sel)].map((el) => el.getBoundingClientRect()));
-      return { x: Math.min(...rects.map((b) => b.left)), y: Math.min(...rects.map((b) => b.top)) + window.scrollY, right: Math.max(...rects.map((b) => b.right)), bottom: Math.max(...rects.map((b) => b.bottom)) + window.scrollY };
-    }, selectors);
-    await page.screenshot({ path: shotPng(name), fullPage: true, clip: { x: r.x - pad, y: r.y - pad, width: r.right - r.x + 2 * pad, height: r.bottom - r.y + 2 * pad }, animations: 'disabled' });
-  };
+  const shotBlock = (name, selectors, pad) => captureBlock(page, name, selectors, pad);
 
   // Registrierung abschließen → Codes
   await page.goto(`${web.url}#/lehrkraft/registrieren`);
@@ -261,10 +265,7 @@ const state = richState();
   await page.locator('.sched-day').first().waitFor();
   await settle(page);
   await page.screenshot({ path: shotPng('terminieren-voll'), fullPage: true, animations: 'disabled' });
-  {
-    const b = await box('.sched-day');
-    await clip45('terminieren', b.x - 8, b.y - 8, 420);
-  }
+  await shotBlock('terminieren', [`[aria-labelledby="sched-day-${D1}"]`], 10);
 
   // PDFs direkt aus den Modulen erzeugen (gleicher Code wie die Knöpfe). Den Elternbrief gibt es zweimal: mit
   // Briefkasten (wie auf parentsday.janrickmer.de: „Absenden – fertig!“) und ohne (PDF per E-Mail an die Lehrkraft).
@@ -379,10 +380,10 @@ print(json.dumps(marks))
   const pt = (px) => (px * 72) / 100; // Koordinaten aus der 100-dpi-Ansicht
   const lastPage = (pdf) => Number(execFileSync('python3', ['-c', 'import sys, pymupdf; print(len(pymupdf.open(sys.argv[1])) - 1)', path.join(raw, pdf)], { encoding: 'utf8' }).trim());
   // Karussell: die Schritte, der gelbe Kasten und der Termin-Schlüssel in ganzer Textbreite; Übersicht für die
-  // Lehrkraft (letzte Seite der Termin-PDF). Ränder liegen zwischen Textzeilen bzw. Tabellenspalten, nie mitten im Wort
+  // Lehrkraft (letzte Seite der Termin-PDF) von der Überschrift bis „Insgesamt … Termine“ in ganzer Breite
   crop('elternbrief.pdf', 'elternbrief', 0, pt(60), 0, pt(760), 0, 'cover,steps');
   crop('elternbrief-email.pdf', 'elternbrief-email', 0, pt(60), 0, pt(760), 0, 'cover,steps');
-  crop('terminbestaetigung.pdf', 'terminbestaetigung', lastPage('terminbestaetigung.pdf'), pt(70), pt(225), pt(560), pt(660));
+  crop('terminbestaetigung.pdf', 'terminbestaetigung', lastPage('terminbestaetigung.pdf'), 43, 100, 553, 480);
   // Abschnitt „Jede Familie hat ihren Termin“: die erste Terminbestätigung in ganzer Breite
   crop('terminbestaetigung.pdf', 'bestaetigung', 0, pt(60), pt(130), pt(760), pt(130 + 725));
   // Abschnitt „Für Eltern genügt der Brief“: ganze Textbreite bis zur Unterschrift (der längere Brief ohne
@@ -412,25 +413,18 @@ print(json.dumps(marks))
   await page.locator(`[data-testid="slot-${D1}-14:00"]`).waitFor();
   for (const t of ['14:00', '14:10', '14:20', '14:30', '14:40', '14:50', '16:00', '16:10']) await page.tap(`[data-testid="slot-${D1}-${t}"]`);
   await settle(page);
-  await page.evaluate(() => {
-    const el = document.querySelector('.parent-day');
-    window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 16);
-  });
-  await page.waitForTimeout(200);
-  await page.screenshot({ path: shotPng('eltern-zeiten'), clip: { x: 0, y: 0, width: 390, height: 487.5 }, animations: 'disabled' });
+  await captureBlock(page, 'eltern-zeiten', [`.parent-day:has([data-testid="day-summary-${D1}"])`], 12);
   await page.close();
 }
 
 // ---------- Zuschnitte als WebP ----------
 const cp = await browser.newPage({ viewport: { width: 800, height: 600 } });
 await cp.goto(web.url);
-for (const name of ['registriert', 'terminieren', 'eltern-zeiten']) {
-  await toWebp(cp, shotPng(name), path.join(out, `${name}.webp`), 680, 850);
-}
-for (const name of ['kalender', 'klassen', 'tabelle']) {
+await toWebp(cp, shotPng('registriert'), path.join(out, 'registriert.webp'), 680, 850);
+for (const name of ['kalender', 'klassen', 'tabelle', 'terminieren', 'eltern-zeiten', 'terminbestaetigung']) {
   await toWebp(cp, shotPng(name), path.join(out, `${name}.webp`), 680, 850, 0.86, 'center');
 }
-for (const name of ['elternbrief', 'elternbrief-email', 'terminbestaetigung']) {
+for (const name of ['elternbrief', 'elternbrief-email']) {
   await toWebp(cp, shotPng(name), path.join(out, `${name}.webp`), 680, 850, 0.86, 'top');
 }
 for (const name of ['brief', 'brief-email']) await toWebp(cp, shotPng(name), path.join(out, `${name}.webp`), 1050, 1388, 0.86);
