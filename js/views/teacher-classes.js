@@ -248,8 +248,8 @@ export default function render(ctx) {
         href: `#/lehrkraft/klasse/${cls.id}`,
         'data-testid': `class-tile-${cls.id}`,
       },
-      h('span', { class: 'tcl-tile-label' }, 'Klasse'),
-      h('span', { class: 'tcl-tile-name' }, cls.id),
+      // Türschild: Kopfband mit großer Klassennummer
+      h('span', { class: 'tcl-tile-head' }, h('span', { class: 'tcl-tile-label' }, 'Klasse'), h('span', { class: 'tcl-tile-name' }, cls.id)),
       h('span', { class: 'tcl-tile-count' }, st.students ? learners(st.students) : 'Noch keine Lernenden'),
       badges.length ? h('span', { class: 'tcl-tile-badges' }, badges) : null,
       h(

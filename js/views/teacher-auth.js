@@ -255,11 +255,11 @@ function renderChoose(ctx) {
     h(
       'a',
       { class: `tauth-choice tauth-choice-${variant}`, href, 'data-testid': testId },
-      h('span', { class: 'tauth-choice-icon', 'aria-hidden': 'true' }, icon),
-      h('span', { class: 'tauth-eyebrow' }, eyebrow),
-      h('h2', { class: 'tauth-choice-title' }, title),
+      // Wie ein Türschild: Kopfband mit Titel, darunter für wen der Weg gedacht ist
+      h('div', { class: 'tauth-choice-head' }, h('span', { class: 'tauth-choice-icon', 'aria-hidden': 'true' }, h('span', { class: `icon icon-${icon}` })), h('h2', { class: 'tauth-choice-title' }, title)),
+      h('span', { class: 'tauth-choice-for' }, eyebrow),
       h('p', { class: 'tauth-choice-text' }, text),
-      h('span', { class: `btn ${variant === 'register' ? 'btn-primary' : 'btn-secondary'} tauth-choice-cta` }, cta, h('span', { 'aria-hidden': 'true' }, ' →')),
+      h('span', { class: `btn ${variant === 'register' ? 'btn-primary' : 'btn-secondary'} tauth-choice-cta` }, cta, h('span', { class: 'icon icon-arrow-right', 'aria-hidden': 'true' })),
     );
 
   mount(
@@ -280,7 +280,7 @@ function renderChoose(ctx) {
           variant: 'register',
           href: '#/lehrkraft/registrieren',
           testId: 'auth-choose-register',
-          icon: '+',
+          icon: 'plus',
           eyebrow: 'Zum ersten Mal hier',
           title: 'Registrieren',
           text: 'Tragen Sie Ihren Namen, Ihr Geburtsdatum und Ihre E-Mail-Adresse ein – Sie erhalten sofort eine PDF-Datei mit Ihrem Registrierungscode.',
@@ -290,7 +290,7 @@ function renderChoose(ctx) {
           variant: 'login',
           href: '#/lehrkraft/anmelden',
           testId: 'auth-choose-login',
-          icon: '→',
+          icon: 'arrow-right',
           eyebrow: 'Schon registriert',
           title: 'Anmelden',
           text: cloudEnabled()
@@ -568,7 +568,7 @@ function renderRegisterSuccess(ctx, state, { pdf, pdfError, existed, cloud = '' 
       h(
         'header',
         { class: 'tauth-success-head' },
-        h('span', { class: 'tauth-success-icon', 'aria-hidden': 'true' }, '✓'),
+        h('span', { class: 'tauth-success-icon', 'aria-hidden': 'true' }, h('span', { class: 'icon icon-check' })),
         h('div', {}, heading, h('p', { class: 'subtitle muted' }, `Willkommen bei ParentsDay, ${fullName(teacher)}!`)),
       ),
       downloadBox,
@@ -818,8 +818,7 @@ function renderLogin(ctx) {
         h(
           'section',
           { class: 'card tauth-way', 'aria-labelledby': 'tauth-way-pdf' },
-          h('span', { class: 'tauth-eyebrow' }, 'Möglichkeit 1'),
-          h('h2', { id: 'tauth-way-pdf' }, 'Mit Ihrer Registrierungs-PDF'),
+          h('div', { class: 'tauth-way-head' }, h('span', { class: 'tauth-way-num' }, 'Möglichkeit 1'), h('h2', { id: 'tauth-way-pdf' }, 'Mit Ihrer Registrierungs-PDF')),
           h('p', { class: 'muted' }, 'Laden Sie die PDF-Datei hoch, die Sie bei der Registrierung erhalten haben. ParentsDay liest Ihre Daten automatisch aus.'),
           dropzone,
           uploadStatus,
@@ -828,8 +827,7 @@ function renderLogin(ctx) {
         h(
           'section',
           { class: 'card tauth-way', 'aria-labelledby': 'tauth-way-data' },
-          h('span', { class: 'tauth-eyebrow' }, 'Möglichkeit 2'),
-          h('h2', { id: 'tauth-way-data' }, 'Mit Ihren Daten'),
+          h('div', { class: 'tauth-way-head' }, h('span', { class: 'tauth-way-num' }, 'Möglichkeit 2'), h('h2', { id: 'tauth-way-data' }, 'Mit Ihren Daten')),
           intro,
           form,
         ),

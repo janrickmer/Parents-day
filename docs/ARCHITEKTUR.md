@@ -143,10 +143,13 @@ Tests: `tests/unit/cloud.test.mjs` (Schlüsselableitung aus Passwort und Person,
 | `404.html` | GitHub Pages liefert sie für unbekannte Pfade (z. B. `/eltern`) und leitet auf die Hash-Adresse (`/#/eltern`) weiter |
 | `js/views/` | eine Datei pro Seite (siehe Routen) |
 | `js/pdf/` | eine Datei pro PDF-Art |
-| `css/base.css` | Farben (CSS-Variablen), Buttons, Formulare, Tabellen, Kacheln, Badges, Hinweise, Dialoge |
+| `css/base.css` | Schrift (`@font-face`), Farben, Bewegung und Icons als CSS-Variablen, Kopf- und Fußzeile, Buttons, Formulare, Tabellen, Kacheln, Badges, Hinweise, Dialoge |
 | `css/views/*.css` | seitenspezifisches CSS, immer mit Präfix-Klasse der Seite |
 | `vendor/` | jsPDF 4.2.1 (UMD), qrcode-generator 2.0.4 (ESM) – lokal, kein CDN |
-| `fonts/` | Liberation Sans (SIL OFL 1.1) für PDFs |
+| `fonts/` | Barlow und Barlow Condensed (SIL OFL 1.1, `woff2`, Teilmengen latin und latin-ext) für die Oberfläche; Liberation Sans (SIL OFL 1.1) für PDFs |
+| `img/start/` | Bilder der Startseite: echte Bildschirmfotos von ParentsDay mit Beispieldaten und Ausschnitte aus den erzeugten PDFs (`webp`), daneben je eine Begleitdatei `<bild>.webp.json` mit der Herkunft; neu aufnehmen mit `node tools/startseite-bilder.mjs` |
+| `tools/` | `startseite-bilder.mjs`: nimmt die Bilder in `img/start/` gegen den lokalen Testserver (ohne Briefkasten) neu auf |
+| `PRODUCT.md`, `DESIGN.md` | Produkt- und Gestaltungsgrundlagen (Zielgruppen, Grundsätze; Farben, Schrift, Bausteine des Erscheinungsbilds) |
 | `tests/unit/` | `node --test` für Kernlogik (`npm test`), darunter `cloud.test.mjs` für Schlüssel, Verschlüsselung und Endpunkte der Cloud-Sicherung |
 | `tests/e2e/` | Browser-Tests mit Playwright/Chromium (`npm run test:e2e`), Hilfen in `helpers.mjs`, lokaler Briefkasten in `mailbox-server.mjs`, Cloud-Sicherung mit zwei Geräten in `cloud.test.mjs`, Anmeldung mit Passwort in `cloud-login.test.mjs` (gemeinsame Hilfen in `cloud-helpers.mjs`) |
 | `docs/` | `ARCHITEKTUR.md`, `ANFORDERUNGEN.md`, `BRIEFKASTEN.md` (Einrichtung und Aktualisierung von Briefkasten und Cloud-Sicherung für Betreiber) |
@@ -227,6 +230,11 @@ Der Elternbrief-Link (`?e=<base64url-JSON>`, `compactEvent()` in `core/transport
 
 ## Gestaltungsregeln
 
+* Erscheinungsbild „Leitsystem im Schulflur“ (Einzelheiten in `DESIGN.md`): Petrol (`--c-wall`) ist der Flügel der Lehrkräfte und der öffentlichen Seiten, Signalgelb (`--c-accent`) der Flügel der Eltern (gelbe Kopfzeile `.parent-header`). Inhalte stehen auf weißen Schildern (`.card`) an der hellen Flurwand (`--c-bg`), Überschriften und Nummern in Barlow Condensed (`--font-display`), Text in Barlow (`--font`). Wiederkehrende Form ist das Türschild: schwarzes Kopfband mit großer Nummer bzw. Datum (Klassen-Kacheln, Tage im Terminplan und bei den Eltern, Auswahl auf „Zugang für Lehrkräfte“).
+* Keine Schatten im Ruhezustand (nur Dialoge, Hinweise und gezogene Elemente schweben, `--shadow-strong`), keine farbigen Seitenstreifen an Karten oder Hinweisen, keine Verläufe. Fokus immer über `--focus` (gelber Innen-, schwarzer Außenring).
+* Icons sind gezeichnete Formen (`h('span', { class: 'icon icon-check' })`, Varianten `check`, `close`, `plus`, `arrow-left`, `arrow-right`, `upload`), keine Schriftzeichen wie ✓ oder ×.
+* Bewegung nur mit den Kurven `--ease-out`, `--ease-in-out`, `--ease-drawer` und den Dauern `--dur-press`/`--dur-fast`/`--dur` (Bedienelemente unter 300 ms; nur die Einblendungen der Startseite beim Scrollen dauern länger); Hover-Bewegungen nur in `@media (hover: hover) and (pointer: fine)`; `prefers-reduced-motion` schaltet Bewegung ab.
+* Die Startseite (`js/views/start.js`, `css/views/start.css`) hat eigene Abschnitte in Flurfarben und eine Türliste zum Ausprobieren (Beispieldaten, `data-ui`). Erscheinen beim Scrollen gibt es nur dort, nur mit Bewegung und nur, wenn der `IntersectionObserver` verfügbar ist.
 * Nur Bausteine aus `css/base.css` verwenden (`.card`, `.btn .btn-primary|secondary|ghost|danger|success`, `.btn-large|small`, `.field`, `.form-grid`, `.table-wrap > .table`, `.tiles > .tile`, `.badge-*`, `.alert-*`, `.dropzone`, `.page-header`, `.stack`, `.cluster`, `.code`, `.legend`).
 * Farben nur über CSS-Variablen (`--c-available` grün, `--c-appt-ok` blau, `--c-appt-partial` orange, `--c-appt-unavailable` rot …).
 * Seitenspezifisches CSS nur in der eigenen Datei `css/views/<view>.css`, Klassen mit eigenem Präfix (z. B. `.sched-…`).

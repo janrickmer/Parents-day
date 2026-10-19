@@ -367,7 +367,7 @@ export default function render(ctx) {
     const remove = h(
       'button',
       { type: 'button', class: 'btn btn-ghost btn-small evt-day-remove', 'aria-label': `${label} entfernen`, title: 'Tag entfernen', onclick: (e) => ignoreRepeat(e) || removeDay(day.date) },
-      h('span', { 'aria-hidden': 'true' }, '✕'),
+      h('span', { class: 'icon icon-close', 'aria-hidden': 'true' }),
       h('span', { class: 'evt-day-remove-text' }, 'Entfernen'),
     );
     const timeField = (input, text) => h('div', { class: 'field evt-time' }, h('label', { for: input.id }, text, h('span', { class: 'visually-hidden' }, ` am ${formatDate(day.date)}`)), input);

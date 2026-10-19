@@ -406,7 +406,7 @@ export default function render(ctx) {
     poolCount.textContent = String(open.length);
     poolHint.hidden = open.length === 0;
     if (open.length === 0) {
-      mount(chipList, h('li', { class: 'sched-pool-empty' }, h('span', { 'aria-hidden': 'true' }, '✓ '), 'Alle Lernenden sind terminiert.'));
+      mount(chipList, h('li', { class: 'sched-pool-empty' }, h('span', { class: 'icon icon-check', 'aria-hidden': 'true' }), ' Alle Lernenden sind terminiert.'));
       return;
     }
     mount(chipList, open.map((st) => h('li', {}, chip(st))));
@@ -539,7 +539,7 @@ export default function render(ctx) {
         style: { top: `${(it.start - day.start) * PX}px`, height: `${it.duration * PX}px`, ...laneStyle(it.lane, it.lanes) },
       },
       main,
-      h('button', { type: 'button', class: 'sched-appt-remove', 'aria-label': `Termin von ${name} entfernen`, title: 'Termin entfernen', onclick: () => removeAppointment(st.id, { focusChip: true }) }, '×'),
+      h('button', { type: 'button', class: 'sched-appt-remove', 'aria-label': `Termin von ${name} entfernen`, title: 'Termin entfernen', onclick: () => removeAppointment(st.id, { focusChip: true }) }, h('span', { class: 'icon icon-close', 'aria-hidden': 'true' })),
       h('div', { class: 'sched-appt-resize', 'aria-hidden': 'true', title: 'Ziehen, um die Dauer zu ändern' }),
     );
     block._label = label;
@@ -706,8 +706,8 @@ export default function render(ctx) {
     const head = h(
       'div',
       { class: 'sched-detail-head' },
-      h('div', {}, h('p', { class: 'sched-detail-kicker' }, scheduled ? 'Ausgewählter Termin' : 'Ausgewählt – noch ohne Termin'), h('h2', { class: 'sched-detail-name' }, fullName(st))),
-      h('button', { type: 'button', class: 'btn btn-ghost btn-icon sched-detail-close', 'aria-label': 'Auswahl schließen', title: 'Schließen', 'data-focus': 'detail-close', onclick: () => select(null) }, '×'),
+      h('div', {}, h('h2', { class: 'sched-detail-name' }, fullName(st)), h('p', { class: 'sched-detail-kicker' }, scheduled ? 'Ausgewählter Termin' : 'Ausgewählt – noch ohne Termin')),
+      h('button', { type: 'button', class: 'btn btn-ghost btn-icon sched-detail-close', 'aria-label': 'Auswahl schließen', title: 'Schließen', 'data-focus': 'detail-close', onclick: () => select(null) }, h('span', { class: 'icon icon-close', 'aria-hidden': 'true' })),
     );
     const lines = availabilityLines(st, days);
     const avail = h(

@@ -462,12 +462,17 @@ function renderLogin(ctx) {
     const errorHost = h('div', { class: 'parent-login-error', 'aria-live': 'polite' });
     const submit = h('button', { type: 'submit', class: 'btn btn-primary btn-large btn-block', 'data-testid': 'parent-login' }, 'Anmelden');
 
+    // Vorname, Nachname und Code stehen wie im Elternbrief in einem gelben Kasten; der Termin-Schlüssel darunter.
     const grid = h(
       'div',
-      { class: 'form-grid' },
-      formField('Vorname des Kindes', first),
-      formField('Nachname des Kindes', last),
-      formField('Code', code, { hint: 'Der Code steht im gelben Kasten des Elternbriefs.', full: true }),
+      { class: 'stack parent-login-fields' },
+      h(
+        'div',
+        { class: 'form-grid parent-yellow-box' },
+        formField('Vorname des Kindes', first),
+        formField('Nachname des Kindes', last),
+        formField('Code', code, { hint: 'Der Code steht im gelben Kasten des Elternbriefs.', full: true }),
+      ),
     );
     // Das Feld steht nur im Formular, wenn es gebraucht wird.
     const setKeyShown = (on) => {
@@ -1335,7 +1340,7 @@ function renderDone(ctx) {
       h(
         'div',
         { class: 'parent-done-hero' },
-        h('span', { class: 'parent-done-check', 'aria-hidden': 'true' }, '✓'),
+        h('span', { class: 'parent-done-check', 'aria-hidden': 'true' }, h('span', { class: 'icon icon-check' })),
         h('h1', {}, 'Fast geschafft!'),
         h('p', { class: 'subtitle' }, `Ihre Zeiten für ${childName(payload)} stehen jetzt in einer PDF-Datei. Es fehlt nur noch die E-Mail an ${teacherLabel}.`),
       ),
@@ -1438,7 +1443,7 @@ function renderSent(ctx, ps) {
       h(
         'section',
         { class: 'parent-sent-hero', 'data-testid': 'parent-sent-ok', 'aria-labelledby': 'parent-sent-title' },
-        h('span', { class: 'parent-sent-check', 'aria-hidden': 'true' }, '✓'),
+        h('span', { class: 'parent-sent-check', 'aria-hidden': 'true' }, h('span', { class: 'icon icon-check' })),
         h('h1', { id: 'parent-sent-title' }, 'Vielen Dank!'),
         // Nach einer Änderung stimmt „nichts weiter tun“ nicht mehr – dann folgt der Hinweis zum erneuten Absenden.
         changedSince

@@ -92,3 +92,4 @@ Weitere Unterlagen:
 * jsPDF (MIT): `vendor/LICENSE-jsPDF.txt`
 * QR Code Generator von Kazuhiko Arase (MIT): `vendor/LICENSE-qrcode-generator.txt`
 * Liberation Sans (SIL Open Font License 1.1): `fonts/LICENSE-LiberationSans.txt`
+* Barlow und Barlow Condensed (SIL Open Font License 1.1): `fonts/LICENSE-Barlow.txt`

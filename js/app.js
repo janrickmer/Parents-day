@@ -72,22 +72,32 @@ export function navigate(path, { replace = false } = {}) {
 }
 
 function logo(href) {
-  return h('a', { class: 'logo', href, 'aria-label': `${APP_NAME} – Startseite` }, h('span', { class: 'logo-mark', 'aria-hidden': 'true' }, 'P'), h('span', { class: 'logo-text' }, 'Parents', h('span', { class: 'logo-accent' }, 'Day')));
+  return h('a', { class: 'logo', href, 'aria-label': `${APP_NAME} – Startseite` }, h('img', { class: 'logo-mark', src: 'favicon.svg', alt: '', width: '36', height: '36' }), h('span', { class: 'logo-text' }, APP_NAME));
 }
 
-function publicHeader() {
+// Navigationslink; der Link zum gerade geöffneten Bereich ist als aktuelle Seite markiert.
+function navLink(href, label, current) {
+  return h('a', { href, 'aria-current': current ? 'page' : null }, label);
+}
+
+function publicHeader(path) {
   return h(
     'header',
     { class: 'site-header' },
-    h('div', { class: 'container header-inner' }, logo('#/'), h('nav', { class: 'header-nav', 'aria-label': 'Hauptnavigation' }, h('a', { href: '#/lehrkraft' }, 'Zugang für Lehrkräfte'), h('a', { href: '#/eltern' }, 'Zugang für Eltern'))),
+    h(
+      'div',
+      { class: 'container header-inner' },
+      logo('#/'),
+      h('nav', { class: 'header-nav', 'aria-label': 'Hauptnavigation' }, navLink('#/lehrkraft', 'Zugang für Lehrkräfte', path.startsWith('/lehrkraft')), navLink('#/eltern', 'Zugang für Eltern', path.startsWith('/eltern'))),
+    ),
   );
 }
 
 function parentHeader() {
-  return h('header', { class: 'site-header' }, h('div', { class: 'container header-inner' }, logo('#/'), h('span', { class: 'header-badge' }, 'Elternzugang')));
+  return h('header', { class: 'site-header parent-header' }, h('div', { class: 'container header-inner' }, logo('#/'), h('span', { class: 'header-badge' }, 'Elternzugang')));
 }
 
-function teacherHeader(state) {
+function teacherHeader(state, path = '') {
   const t = state.teacher;
   const persistent = isPersistentStorage();
   const savedInfo = h('span', { class: 'save-indicator', 'data-testid': 'save-indicator' });
@@ -124,8 +134,8 @@ function teacherHeader(state) {
       h(
         'nav',
         { class: 'header-nav', 'aria-label': 'Lehrkräfte-Navigation' },
-        state.event ? h('a', { href: '#/lehrkraft/klassen' }, 'Klassen') : h('a', { href: '#/lehrkraft/elternsprechtag' }, 'Elternsprechtag erstellen'),
-        state.event ? h('a', { href: '#/lehrkraft/einstellungen' }, 'Weitere Einstellungen') : null,
+        state.event ? navLink('#/lehrkraft/klassen', 'Klassen', path.startsWith('/lehrkraft/klasse')) : navLink('#/lehrkraft/elternsprechtag', 'Elternsprechtag erstellen', path === '/lehrkraft/elternsprechtag'),
+        state.event ? navLink('#/lehrkraft/einstellungen', 'Weitere Einstellungen', path === '/lehrkraft/einstellungen') : null,
       ),
       h(
         'div',
@@ -162,7 +172,7 @@ function teacherHeader(state) {
         ),
       ),
     ),
-    h('div', { class: 'container header-status' }, savedInfo, cloud.element),
+    h('div', { class: 'header-status-bar' }, h('div', { class: 'container header-status' }, savedInfo, cloud.element)),
   );
   header._cleanup = () => {
     unsubscribe();
@@ -176,7 +186,7 @@ function footer() {
   return h(
     'footer',
     { class: 'site-footer' },
-    h('div', { class: 'container footer-inner' }, h('span', {}, `${APP_NAME} – Elternsprechtage einfach organisieren`), h('a', { href: '#/datenschutz' }, 'Datenschutz-Hinweise')),
+    h('div', { class: 'container footer-inner' }, h('span', {}, h('span', { class: 'footer-name' }, APP_NAME), ' – Elternsprechtage einfach organisieren'), h('a', { href: '#/datenschutz' }, 'Datenschutz-Hinweise')),
   );
 }
 
@@ -361,7 +371,7 @@ async function render() {
   const layout = route ? route.layout : notFoundState ? 'teacher' : 'public';
 
   const main = h('main', { id: 'main', class: 'container main', tabindex: '-1' });
-  const header = layout === 'teacher' ? teacherHeader(state || notFoundState) : layout === 'parent' ? parentHeader() : publicHeader();
+  const header = layout === 'teacher' ? teacherHeader(state || notFoundState, path) : layout === 'parent' ? parentHeader() : publicHeader(path);
   mount(app, h('a', { class: 'skip-link', href: '#main', onclick: (e) => (e.preventDefault(), main.focus()) }, 'Zum Inhalt springen'), header, main, footer());
   headerObserver?.disconnect();
   headerObserver?.observe(header);

@@ -147,7 +147,7 @@
 }
 .tc-del {
   color: var(--c-muted);
-  font-size: 1.4rem;
+  font-size: 1rem;
   line-height: 1;
 }
 .tc-del:hover:not(:disabled) {
@@ -162,9 +162,7 @@
   margin-top: 12px;
 }
 .tc-add-plus {
-  font-size: 1.3rem;
-  line-height: 1;
-  margin-top: -2px;
+  font-size: 0.9rem;
 }
 .tc-feedback:not(:empty) {
   margin-top: 16px;
@@ -184,8 +182,8 @@
 /* ---------- Hauptknopf ---------- */
 
 .tc-primary {
-  margin-top: 20px;
-  padding-top: 20px;
+  margin-top: 22px;
+  padding-top: 22px;
   border-top: 1px solid var(--c-border);
   display: flex;
   flex-wrap: wrap;
@@ -212,16 +210,18 @@
 }
 .tc-resp-count {
   margin: 0;
+  font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
 }
+/* Füllstand in ganzen Feldern wie eine Belegungsanzeige */
 .tc-resp-bar {
   flex: 1 1 180px;
   max-width: 320px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--c-surface-2);
-  border: 1px solid var(--c-border);
+  height: 12px;
+  border-radius: 2px;
+  background: #d3dfdd;
   overflow: hidden;
 }
 .tc-resp-bar-fill {
@@ -229,7 +229,7 @@
   height: 100%;
   width: 0;
   background: var(--c-available);
-  transition: width 0.3s;
+  transition: width var(--dur) var(--ease-out);
 }
 .tc-responses > p {
   max-width: 860px;
@@ -295,10 +295,9 @@
     content: attr(data-label);
     display: block;
     margin-bottom: 2px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 600;
     color: var(--c-muted);
   }
   .tc-row-error {

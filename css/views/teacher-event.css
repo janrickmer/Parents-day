@@ -27,7 +27,8 @@
   scroll-margin-top: 140px;
 }
 .evt-summary:focus {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: var(--focus);
 }
 .evt-summary p {
@@ -58,17 +59,18 @@
   align-items: center;
   gap: 10px;
 }
+/* Schrittnummer als kleines gelbes Schild */
 .evt-step {
   flex: none;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: var(--c-accent-soft);
-  border: 2px solid var(--c-accent-border);
-  color: #6b5300;
-  font-size: 0.95rem;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-small);
+  background: var(--c-accent);
+  color: var(--c-ink);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
   font-weight: 800;
 }
 .evt-card-intro {
@@ -114,6 +116,8 @@
   outline: none;
 }
 .evt-list-title:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: var(--focus);
   border-radius: 4px;
 }
@@ -148,14 +152,12 @@
   align-items: center;
   gap: 6px 16px;
   padding: 12px 14px;
-  border: 1px solid var(--c-border);
-  border-left: 4px solid var(--c-primary);
+  border: 1px solid transparent;
   border-radius: var(--radius);
   background: var(--c-surface-2);
 }
 .evt-day-invalid {
   border-color: #f1b9b9;
-  border-left-color: var(--c-danger);
   background: var(--c-danger-soft);
 }
 .evt-day-head {
@@ -323,8 +325,7 @@
   }
 }
 .evt-danger {
-  border-color: #f1b9b9;
-  border-top: 4px solid var(--c-danger);
+  background: var(--c-danger-soft);
 }
 .evt-danger > h2 {
   color: var(--c-danger);
@@ -365,21 +366,23 @@
   place-items: center;
   width: 42px;
   height: 42px;
-  border-radius: 8px;
-  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-small);
+  border: 2px solid var(--c-ink);
   background: var(--c-surface);
-  color: var(--c-primary);
+  color: var(--c-ink);
   font: inherit;
-  font-size: 1.6rem;
+  font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
-}
-.calp-nav span {
-  margin-top: -3px;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
 .calp-nav:hover:not(:disabled) {
-  border-color: var(--c-primary);
-  background: var(--c-primary-soft);
+  background: var(--c-accent-soft);
+}
+.calp-nav:active:not(:disabled) {
+  transform: scale(0.95);
 }
 .calp-nav:disabled {
   opacity: 0.4;
@@ -410,7 +413,7 @@
   color: var(--c-muted);
 }
 .calp-grid th.calp-weekend {
-  color: #6b7385;
+  color: #5d6b6a;
 }
 .calp-grid td {
   padding: 0;
@@ -421,14 +424,18 @@
   width: 100%;
   height: 44px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-small);
   border: 1px solid var(--c-border);
   background: var(--c-surface);
   color: var(--c-text);
   font: inherit;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
-  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    border-color var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out);
 }
 
 .calp-day.calp-weekend {
@@ -453,8 +460,8 @@
   background: var(--c-accent-border);
 }
 .calp-day[aria-pressed='true'] {
-  background: var(--c-primary);
-  border-color: var(--c-primary-dark);
+  background: var(--c-wall);
+  border-color: var(--c-wall-dark);
   color: #fff;
   font-weight: 700;
 }
@@ -465,7 +472,7 @@
 .calp-day[aria-disabled='true'] {
   background: transparent;
   border-color: transparent;
-  color: #b7bfcc;
+  color: #a3b1af;
   font-weight: 400;
   cursor: not-allowed;
 }
@@ -492,9 +499,10 @@
   }
 }
 .calp-day:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   z-index: 1;
-  box-shadow: 0 0 0 2px var(--c-surface), 0 0 0 5px var(--c-primary);
+  box-shadow: var(--focus);
 }
 .calp-legend {
   margin-top: 8px;
@@ -502,7 +510,7 @@
   font-size: 0.8rem;
 }
 .calp-swatch-selected {
-  background: var(--c-primary);
+  background: var(--c-wall);
 }
 .calp-swatch-today {
   background: var(--c-surface);
@@ -539,7 +547,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  border-top: 4px solid var(--c-primary);
 }
 .evt-mailbox > p,
 .evt-mailbox .alert p {

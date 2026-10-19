@@ -547,7 +547,8 @@ test('Neues Gerät: Hinweis mit „Zwischenstand laden“, fremder Stand wird ab
     await page.waitForSelector(tid('class-tile-5a'));
     // Nur noch der passende Hinweis, nicht mehr „Willkommen …“ oder „keine Daten“
     await page.locator('.toast', { hasText: 'Zwischenstand geladen.' }).waitFor();
-    assert.deepEqual(await page.locator('.toast').allTextContents(), ['Zwischenstand geladen.×']);
+    assert.deepEqual(await page.locator('.toast .toast-text').allTextContents(), ['Zwischenstand geladen.']);
+    assert.equal(await page.locator('.toast').count(), 1);
     assert.equal((await storedState(page, ANNA.teacherCode)).teacher.firstName, 'Anna');
     assert.deepEqual(errors, []);
   } finally {

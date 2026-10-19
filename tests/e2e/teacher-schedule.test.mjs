@@ -71,6 +71,14 @@ function scheduleState() {
   });
 }
 
+/** Wartet, bis das Detailblatt fertig eingeblendet ist (am Smartphone gleitet es von unten herein). */
+async function sheetSettled(page) {
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.sched-detail');
+    return Boolean(el) && el.getAnimations().every((a) => a.playState !== 'running');
+  });
+}
+
 function readState(page) {
   return page.evaluate((code) => JSON.parse(localStorage.getItem(`parentsday.teacher.${code}`)), T_CODE);
 }
@@ -535,6 +543,7 @@ test('Terminieren auf Tablet (Touch) und Smartphone', async () => {
       assert.equal(await page.evaluate(() => window.innerWidth), 390);
       await shot(page, 'schedule-phone');
       await page.tap(`${tid('appointment-s2')} .sched-appt-main`);
+      await sheetSettled(page);
       const sheet = await page.locator('.sched-detail').boundingBox();
       assert.ok(Math.round(sheet.y + sheet.height) <= 844 && sheet.y > 200, 'Detailfeld als Blatt am unteren Rand');
       await shot(page, 'schedule-phone-detail', { fullPage: false });
@@ -544,6 +553,7 @@ test('Terminieren auf Tablet (Touch) und Smartphone', async () => {
       assert.equal(await page.locator('.sched-detail').isVisible(), false);
       await page.tap(tid('schedule-student-s4'));
       await page.evaluate(() => document.querySelector('.sched-main').scrollIntoView());
+      await sheetSettled(page);
       const compact = await page.locator('.sched-detail').boundingBox();
       assert.ok(compact.height < 400, `Blatt zu hoch: ${compact.height}px`);
       assert.equal(await page.locator('.sched-detail select').isVisible(), false);

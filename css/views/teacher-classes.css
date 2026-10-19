@@ -70,7 +70,7 @@
 }
 .tcl-event-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.5rem;
 }
 .tcl-facts {
   margin: 0;
@@ -116,48 +116,72 @@
 .tcl-tiles {
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
 }
+/* Jede Klasse ist ein Türschild: schwarzes Kopfband mit großer Klassennummer und Statuspunkt */
 .tcl-tile {
-  min-height: 176px;
-  border-top: 4px solid var(--c-accent-border);
+  min-height: 190px;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
 }
-.tcl-tile-ready {
-  border-top-color: var(--c-success);
+.tcl-tile-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 18px 11px;
+  background: var(--c-ink);
+  color: #fff;
 }
-.tcl-tile:focus-visible {
-  border-color: var(--c-primary);
+.tcl-tile-head::after {
+  content: '';
+  align-self: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--c-accent);
+}
+.tcl-tile-ready .tcl-tile-head::after {
+  background: var(--c-available);
 }
 .tcl-tile-label {
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--c-muted);
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--c-on-ink-muted);
 }
 .tcl-tile-name {
-  font-size: 2.5rem;
+  font-family: var(--font-display);
+  font-size: 3.4rem;
   font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  color: var(--c-primary);
-  margin-bottom: 2px;
+  line-height: 0.9;
+  letter-spacing: -0.01em;
+  color: #fff;
 }
 .tcl-tile-count {
+  padding: 14px 18px 0;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .tcl-tile-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding: 8px 18px 0;
 }
 .tcl-tile-status {
-  margin-top: auto;
-  padding-top: 10px;
+  margin: auto 18px 0;
+  padding: 12px 0 14px;
   border-top: 1px solid var(--c-border);
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   font-weight: 600;
+}
+.tcl-tile-badges + .tcl-tile-status,
+.tcl-tile-count + .tcl-tile-status {
+  margin-top: auto;
 }
 .tcl-tile-status::before {
   content: '';
@@ -168,15 +192,20 @@
   background: currentColor;
 }
 .tcl-tile-status::after {
-  content: '→';
-  content: '→' / '';
+  content: '';
+  width: 18px;
+  height: 18px;
   margin-left: auto;
-  color: var(--c-muted);
-  transition: transform 0.12s;
+  background: var(--c-muted);
+  -webkit-mask: var(--icon-arrow-right) center / contain no-repeat;
+  mask: var(--icon-arrow-right) center / contain no-repeat;
+  transition: transform var(--dur) var(--ease-out);
 }
-.tcl-tile:hover .tcl-tile-status::after {
-  transform: translateX(3px);
-  color: var(--c-primary);
+@media (hover: hover) and (pointer: fine) {
+  .tcl-tile:hover .tcl-tile-status::after {
+    transform: translateX(4px);
+    background: var(--c-ink);
+  }
 }
 .tcl-status-todo {
   color: var(--c-warning);
@@ -190,10 +219,10 @@
 @keyframes tcl-highlight {
   0%,
   40% {
-    box-shadow: 0 0 0 5px rgba(242, 194, 0, 0.55), var(--shadow);
+    box-shadow: 0 0 0 5px rgba(243, 197, 34, 0.7);
   }
   100% {
-    box-shadow: var(--shadow);
+    box-shadow: 0 0 0 0 rgba(243, 197, 34, 0);
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -62,7 +62,7 @@ export function toast(message, type = 'info', timeout = 4500) {
     'div',
     { class: `toast toast-${type}` },
     h('span', { class: 'toast-text' }, message),
-    h('button', { type: 'button', class: 'toast-close', 'aria-label': 'Hinweis schließen', title: 'Schließen', onclick: hide }, h('span', { 'aria-hidden': 'true' }, '×')),
+    h('button', { type: 'button', class: 'toast-close', 'aria-label': 'Hinweis schließen', title: 'Schließen', onclick: hide }, h('span', { class: 'icon icon-close', 'aria-hidden': 'true' })),
   );
   toastHost.appendChild(el);
   timer = setTimeout(hide, timeout);
@@ -221,7 +221,7 @@ export function fileDropZone({ accept = '', multiple = false, label, hint = '', 
   const zone = h(
     'div',
     { class: `dropzone${compact ? ' dropzone-compact' : ''}`, role: 'button', tabindex: '0', 'aria-label': label, 'data-testid': testId },
-    h('div', { class: 'dropzone-icon', 'aria-hidden': 'true' }, '⬆'),
+    h('div', { class: 'dropzone-icon', 'aria-hidden': 'true' }, h('span', { class: 'icon icon-upload' })),
     h('div', { class: 'dropzone-label' }, label),
     hint ? h('div', { class: 'dropzone-hint' }, hint) : null,
     input,

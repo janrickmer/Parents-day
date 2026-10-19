@@ -2,3 +2,9 @@ node_modules/
 test-results/
 tests/e2e/output/
 .DS_Store
+
+# Arbeitsdateien der Design-Werkzeuge. Nicht einchecken: GitHub Pages veröffentlicht das ganze Repository
+# (auch Punkt-Ordner wegen .nojekyll). Nur die Design-Tokens (.impeccable/design.json) gehören dazu.
+.impeccable/*
+!.impeccable/design.json
+.taste-skill/

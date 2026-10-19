@@ -18,98 +18,111 @@
   display: none !important;
 }
 
-/* Umschalter Registrieren | Anmelden */
+/* Umschalter Registrieren | Anmelden: zwei Felder auf einem Schild */
 .tauth-switch {
   align-self: flex-start;
   display: inline-flex;
-  gap: 4px;
-  padding: 4px;
+  gap: 3px;
+  padding: 3px;
   background: var(--c-surface);
-  border: 1px solid var(--c-border);
-  border-radius: 999px;
-  box-shadow: var(--shadow);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--radius-small);
 }
 .tauth-switch-link {
   display: inline-flex;
   align-items: center;
   min-height: 40px;
   padding: 6px 22px;
-  border-radius: 999px;
+  border-radius: 2px;
   font-weight: 600;
   text-decoration: none;
   color: var(--c-text);
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 .tauth-switch-link:hover {
-  background: var(--c-primary-soft);
-  color: var(--c-primary-dark);
+  background: var(--c-accent-soft);
+  color: var(--c-ink);
 }
 .tauth-switch-link[aria-current='page'] {
-  background: var(--c-primary);
+  background: var(--c-ink);
   color: #fff;
 }
 
-.tauth-eyebrow {
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--c-primary);
-}
-
-/* Auswahl-Karten */
+/* Auswahl: zwei Türschilder mit schwarzem Kopfband */
 .tauth-choice {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  padding: 28px 24px 24px;
-  border: 2px solid var(--c-border);
-  border-radius: 14px;
+  overflow: hidden;
+  border-radius: var(--radius);
   background: var(--c-surface);
-  box-shadow: var(--shadow);
   color: var(--c-text);
   text-decoration: none;
-  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+  transition:
+    transform var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
 }
-.tauth-choice:hover,
-.tauth-choice:focus-visible {
-  transform: translateY(-2px);
-  border-color: var(--c-primary);
-  box-shadow: var(--shadow-strong);
+.tauth-choice:hover {
   color: var(--c-text);
 }
+@media (hover: hover) and (pointer: fine) {
+  .tauth-choice:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-strong);
+  }
+}
+.tauth-choice:active {
+  transform: scale(0.985);
+}
 .tauth-choice:focus-visible {
-  box-shadow: var(--focus), var(--shadow-strong);
+  box-shadow: var(--focus);
+}
+.tauth-choice-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  align-self: stretch;
+  padding: 16px 22px;
+  background: var(--c-ink);
+  color: #fff;
+}
+.tauth-choice-login .tauth-choice-head {
+  background: var(--c-wall);
 }
 .tauth-choice-icon {
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
-  margin-bottom: 6px;
-  border-radius: 14px;
-  background: var(--c-primary);
-  color: #fff;
-  font-size: 1.8rem;
-  font-weight: 800;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-small);
+  background: var(--c-accent);
+  color: var(--c-ink);
+  font-size: 1.5rem;
   line-height: 1;
 }
 .tauth-choice-login .tauth-choice-icon {
-  background: var(--c-accent-soft);
-  border: 2px solid var(--c-accent-border);
-  color: #6b5300;
+  background: #fff;
 }
 .tauth-choice-title {
-  font-size: 1.6rem;
+  font-size: 2.3rem;
+  line-height: 1;
   margin: 0;
+}
+.tauth-choice-for {
+  padding: 18px 22px 0;
+  font-weight: 700;
+  font-size: 1.05rem;
 }
 .tauth-choice-text {
   flex: 1;
-  margin: 0 0 8px;
+  margin: 4px 0 0;
+  padding: 0 22px;
   color: var(--c-muted);
 }
 .tauth-choice-cta {
   pointer-events: none;
+  margin: 18px 22px 22px;
 }
 
 /* Hinweis „Sie sind angemeldet als …“ */
@@ -143,8 +156,9 @@
   text-align: center;
 }
 .tauth-code-input {
-  font-family: var(--font-mono);
-  letter-spacing: 0.04em;
+  font-family: var(--font-code);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
 }
 /* Anmelden mit Daten: „Passwort merken“ und Links unter den Feldern */
 .tauth-form > .cloud-remember {
@@ -171,8 +185,26 @@
   flex-direction: column;
   gap: 10px;
 }
-.tauth-way > h2 {
+/* Kopf: kleines gelbes Schild „Möglichkeit 1“ in einer Zeile mit der Überschrift */
+.tauth-way-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.tauth-way-head h2 {
   margin: 0;
+}
+.tauth-way-num {
+  flex: none;
+  padding: 3px 8px 2px;
+  border-radius: var(--radius-small);
+  background: var(--c-accent);
+  color: var(--c-ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.2;
 }
 .tauth-way > p {
   margin: 0 0 4px;
@@ -212,12 +244,10 @@
   place-items: center;
   width: 56px;
   height: 56px;
-  border-radius: 50%;
-  background: var(--c-success-soft);
-  border: 2px solid var(--c-success);
-  color: var(--c-success);
+  border-radius: var(--radius);
+  background: var(--c-success);
+  color: #fff;
   font-size: 1.8rem;
-  font-weight: 800;
 }
 .tauth-success-title {
   margin: 0;
@@ -241,20 +271,21 @@
   flex-direction: column;
   gap: 4px;
   padding: 16px 20px;
-  border: 2px solid var(--c-accent-border);
-  border-radius: var(--radius);
-  background: var(--c-accent-soft);
+  border: 2px solid #e2b400;
+  border-radius: var(--radius-small);
+  background: #fff4b3;
 }
 .tauth-code-label {
   font-weight: 700;
   font-size: 0.9rem;
-  color: #6b5300;
+  color: var(--c-accent-text);
 }
 .tauth-code-value {
-  font-family: var(--font-mono);
+  font-family: var(--font-code);
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
-  font-size: 1.45rem;
-  letter-spacing: 0.03em;
+  font-size: 1.5rem;
+  letter-spacing: 0.05em;
   line-height: 1.2;
   color: var(--c-text);
   overflow-wrap: anywhere;
@@ -288,7 +319,7 @@
 }
 
 .tauth-summary-card > h2 {
-  font-size: 1.1rem;
+  font-size: 1.35rem;
 }
 .tauth-summary {
   display: grid;
@@ -326,11 +357,18 @@
     justify-content: center;
     padding: 6px 12px;
   }
-  .tauth-choice {
-    padding: 20px 18px 18px;
+  .tauth-choice-head {
+    padding: 14px 18px;
+  }
+  .tauth-choice-for {
+    padding: 16px 18px 0;
+  }
+  .tauth-choice-text {
+    padding: 0 18px;
   }
   .tauth-choice-cta {
     align-self: stretch;
+    margin: 16px 18px 18px;
   }
   .tauth-actions .btn,
   .tauth-download .btn {

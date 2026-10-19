@@ -12,7 +12,7 @@ export default function render({ root, setTitle }) {
     root,
     h(
       'article',
-      { class: 'card card-narrow stack' },
+      { class: 'card card-narrow stack read-page' },
       h('h1', {}, 'Datenschutz-Hinweise'),
       withMailbox
         ? h(

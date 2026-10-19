@@ -24,9 +24,22 @@ function contrast(a, b) {
 
 test('Fokusrahmen: kräftiger Doppelring statt halbtransparentem Schatten', () => {
   const focus = /--focus:\s*([^;]+);/.exec(base)[1];
-  assert.match(focus, /var\(--c-surface\).*var\(--c-primary\)/);
-  assert.ok(contrast(variable('--c-primary'), variable('--c-bg')) >= 3);
-  assert.ok(contrast(variable('--c-primary'), '#ffffff') >= 3);
+  // Gelber Innenring, schwarzer Außenring: einer der beiden Ringe hebt sich auf jedem Grund ab
+  assert.match(focus, /var\(--c-accent\).*var\(--c-ink\)/);
+  assert.ok(contrast(variable('--c-ink'), variable('--c-bg')) >= 3);
+  assert.ok(contrast(variable('--c-ink'), '#ffffff') >= 3);
+  assert.ok(contrast(variable('--c-accent'), variable('--c-wall')) >= 3, 'Innenring auf der Petrol-Kopfzeile');
+  assert.ok(contrast(variable('--c-accent'), variable('--c-ink')) >= 3, 'Innenring auf schwarzen Knöpfen');
+});
+
+test('Links und Schrift auf den Flügelfarben mindestens 4,5:1', () => {
+  assert.ok(contrast(variable('--c-primary'), '#ffffff') >= 4.5);
+  assert.ok(contrast(variable('--c-primary'), variable('--c-bg')) >= 4.5);
+  assert.ok(contrast(variable('--c-wall'), '#ffffff') >= 4.5, 'weiße Schrift auf Petrol');
+  assert.ok(contrast(variable('--c-wall-muted'), variable('--c-wall')) >= 4.5, 'Nebentext auf Petrol');
+  assert.ok(contrast(variable('--c-ink'), variable('--c-accent')) >= 4.5, 'schwarze Schrift auf Gelb');
+  assert.ok(contrast(variable('--c-muted'), variable('--c-bg')) >= 4.5, 'Nebentext auf der Flurwand');
+  assert.ok(contrast(variable('--c-muted'), variable('--c-surface-2')) >= 4.5);
 });
 
 test('Ränder von Eingabefeldern mindestens 3:1', () => {
@@ -38,6 +51,11 @@ test('Grüne und graue Kleintexte mindestens 4,5:1', () => {
   assert.ok(contrast(green, '#ffffff') >= 4.5);
   assert.ok(contrast(green, variable('--c-success-soft')) >= 4.5);
   assert.match(base, /\.badge-success\s*{[^}]*color:\s*var\(--c-success-text\)/);
+  // Grüner Knopf (z. B. „Absenden“ bei den Eltern): weiße Schrift auf dunklem Grün
+  assert.match(base, /\.btn-success\s*{[^}]*background:\s*var\(--c-success-text\)[^}]*color:\s*#fff;/);
+  const hover = /\.btn-success:hover:not\(:disabled\)\s*{\s*background:\s*(#[0-9a-fA-F]{6})/.exec(base)[1];
+  assert.ok(contrast(hover, '#ffffff') >= 4.5, `grüner Knopf beim Überfahren ${hover}`);
+  assert.ok(contrast(variable('--c-on-ink-muted'), variable('--c-ink')) >= 4.5, 'Nebenschrift auf schwarzen Kopfbändern');
   assert.match(css('views/teacher-classes.css'), /\.tcl-status-ready\s*{[^}]*color:\s*var\(--c-success-text\)/);
   const weekend = /\.calp-grid th\.calp-weekend\s*{\s*color:\s*(#[0-9a-fA-F]{6})/.exec(css('views/teacher-event.css'))[1];
   assert.ok(contrast(weekend, '#ffffff') >= 4.5, `Wochenend-Spaltenkopf ${weekend}`);

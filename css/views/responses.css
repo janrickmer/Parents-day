@@ -62,17 +62,15 @@
 
 .resp-section-title {
   margin: 0 0 8px;
-  font-size: 1.05rem;
+  font-size: 1.15rem;
 }
 .resp-mailbox {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 16px;
-  border: 1px solid var(--c-border);
-  border-left: 5px solid var(--c-primary);
+  padding: 16px 18px;
   border-radius: var(--radius);
-  background: var(--c-surface-2);
+  background: var(--c-primary-soft);
 }
 .resp-mailbox > * {
   margin: 0;

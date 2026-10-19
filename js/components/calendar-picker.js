@@ -84,12 +84,12 @@ export function createCalendarPicker({ selected = [], onChange, month, testId = 
   const prev = h(
     'button',
     { type: 'button', class: 'calp-nav', 'data-testid': `${testId}-prev`, onclick: () => stepMonth(-1) },
-    h('span', { 'aria-hidden': 'true' }, '‹'),
+    h('span', { class: 'icon icon-arrow-left', 'aria-hidden': 'true' }),
   );
   const next = h(
     'button',
     { type: 'button', class: 'calp-nav', 'data-testid': `${testId}-next`, onclick: () => stepMonth(1) },
-    h('span', { 'aria-hidden': 'true' }, '›'),
+    h('span', { class: 'icon icon-arrow-right', 'aria-hidden': 'true' }),
   );
   const body = h('tbody', {});
   const hint = h(

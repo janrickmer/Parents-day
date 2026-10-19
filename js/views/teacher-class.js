@@ -228,7 +228,7 @@ export default function render(ctx) {
   const thead = h('thead', {});
   const tbody = h('tbody', {});
   const table = h('table', { class: 'table tc-table' }, h('caption', { class: 'visually-hidden' }, `Lernende der Klasse ${classId}`), thead, tbody);
-  const addBtn = h('button', { type: 'button', class: 'btn btn-secondary tc-add', 'data-testid': 'add-student', onclick: () => addRow() }, h('span', { 'aria-hidden': 'true', class: 'tc-add-plus' }, '+'), 'Weitere Lernende hinzufügen');
+  const addBtn = h('button', { type: 'button', class: 'btn btn-secondary tc-add', 'data-testid': 'add-student', onclick: () => addRow() }, h('span', { 'aria-hidden': 'true', class: 'icon icon-plus tc-add-plus' }), 'Weitere Lernende hinzufügen');
   const feedback = h('div', { class: 'tc-feedback', 'aria-live': 'polite' });
   const primaryBtn = h('button', { type: 'button', class: 'btn btn-primary btn-large tc-primary-btn', 'data-testid': 'primary-action', onclick: onPrimary }, LABEL_ENTER);
   const primaryHint = h('p', { class: 'tc-primary-hint small muted' });
@@ -318,7 +318,7 @@ export default function render(ctx) {
     const first = nameInput(row, 'firstName', index);
     const codeCell = h('td', { class: 'tc-code', 'data-testid': 'student-code', 'data-label': 'Code' });
     const availCell = showAvail ? h('td', { class: 'tc-avail', 'data-testid': 'student-availability', 'data-label': 'Verfügbarkeit der Eltern' }) : null;
-    const del = h('button', { type: 'button', class: 'btn btn-ghost btn-icon tc-del', 'aria-label': 'Zeile löschen', title: 'Zeile löschen', onclick: () => onDeleteRow(row.id) }, h('span', { 'aria-hidden': 'true' }, '×'));
+    const del = h('button', { type: 'button', class: 'btn btn-ghost btn-icon tc-del', 'aria-label': 'Zeile löschen', title: 'Zeile löschen', onclick: () => onDeleteRow(row.id) }, h('span', { class: 'icon icon-close', 'aria-hidden': 'true' }));
     const tr = h(
       'tr',
       { 'data-testid': 'student-row', dataset: { id: row.id } },

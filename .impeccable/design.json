@@ -1,0 +1,898 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-19T04:38:19Z",
+  "title": "Design System: ParentsDay",
+  "extensions": {
+    "colorMeta": {
+      "wall": {
+        "role": "primary",
+        "displayName": "Petrol-Wand",
+        "canonical": "#0a5f60",
+        "oklch": "oklch(44.1% 0.072 196.2)",
+        "tonalRamp": [
+          "#000e0f",
+          "#002c2c",
+          "#004c4d",
+          "#226e6f",
+          "#489091",
+          "#6bb3b4",
+          "#90d8d9",
+          "#b5fefe"
+        ]
+      },
+      "wall-dark": {
+        "role": "primary",
+        "displayName": "Tiefes Petrol (Wand)",
+        "canonical": "#084a4b",
+        "oklch": "oklch(37.2% 0.060 196.5)",
+        "tonalRamp": [
+          "#000e0f",
+          "#002c2c",
+          "#0b4c4d",
+          "#326c6d",
+          "#558e8e",
+          "#77b1b2",
+          "#9bd6d6",
+          "#c0fcfc"
+        ]
+      },
+      "wall-muted": {
+        "role": "primary",
+        "displayName": "Petrol-Nebelschrift",
+        "canonical": "#cfe3e1",
+        "oklch": "oklch(90.0% 0.021 189.5)",
+        "tonalRamp": [
+          "#020e0d",
+          "#192827",
+          "#354644",
+          "#546564",
+          "#748785",
+          "#97aaa8",
+          "#bacecc",
+          "#dff3f1"
+        ]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Petrol",
+        "canonical": "#0a5f60",
+        "oklch": "oklch(44.1% 0.072 196.2)",
+        "tonalRamp": [
+          "#000e0f",
+          "#002c2c",
+          "#004c4d",
+          "#226e6f",
+          "#489091",
+          "#6bb3b4",
+          "#90d8d9",
+          "#b5fefe"
+        ]
+      },
+      "primary-dark": {
+        "role": "primary",
+        "displayName": "Tiefes Petrol",
+        "canonical": "#084a4b",
+        "oklch": "oklch(37.2% 0.060 196.5)",
+        "tonalRamp": [
+          "#000e0f",
+          "#002c2c",
+          "#0b4c4d",
+          "#326c6d",
+          "#558e8e",
+          "#77b1b2",
+          "#9bd6d6",
+          "#c0fcfc"
+        ]
+      },
+      "primary-soft": {
+        "role": "primary",
+        "displayName": "Petrol-Hauch",
+        "canonical": "#d5e8e5",
+        "oklch": "oklch(91.6% 0.021 185.5)",
+        "tonalRamp": [
+          "#020e0c",
+          "#192826",
+          "#364643",
+          "#556563",
+          "#758784",
+          "#97a9a7",
+          "#bbcecb",
+          "#e0f3f0"
+        ]
+      },
+      "accent": {
+        "role": "secondary",
+        "displayName": "Signalgelb",
+        "canonical": "#f3c522",
+        "oklch": "oklch(84.0% 0.165 90.9)",
+        "tonalRamp": [
+          "#100a00",
+          "#2f2400",
+          "#514000",
+          "#775e00",
+          "#9e7e00",
+          "#c8a000",
+          "#f1c41f",
+          "#ffeebd"
+        ]
+      },
+      "accent-soft": {
+        "role": "secondary",
+        "displayName": "Gelbhauch",
+        "canonical": "#fcefbf",
+        "oklch": "oklch(95.1% 0.063 94.7)",
+        "tonalRamp": [
+          "#0f0b00",
+          "#2d2400",
+          "#4d4115",
+          "#6d6135",
+          "#8e8256",
+          "#b1a578",
+          "#d6c99b",
+          "#fcefbf"
+        ]
+      },
+      "accent-border": {
+        "role": "secondary",
+        "displayName": "Ockerkante",
+        "canonical": "#d9ab00",
+        "oklch": "oklch(76.2% 0.156 89.2)",
+        "tonalRamp": [
+          "#100a00",
+          "#302300",
+          "#523f00",
+          "#785d00",
+          "#a07d00",
+          "#ca9f00",
+          "#f2c337",
+          "#ffedc0"
+        ]
+      },
+      "accent-text": {
+        "role": "secondary",
+        "displayName": "Ockerschrift",
+        "canonical": "#5c4600",
+        "oklch": "oklch(40.6% 0.083 88.1)",
+        "tonalRamp": [
+          "#100a00",
+          "#302300",
+          "#533f00",
+          "#755e22",
+          "#978045",
+          "#bba267",
+          "#e0c78a",
+          "#ffedc2"
+        ]
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Flurwand",
+        "canonical": "#e3eceb",
+        "oklch": "oklch(93.6% 0.010 189.1)",
+        "tonalRamp": [
+          "#070d0c",
+          "#202726",
+          "#3c4443",
+          "#5b6362",
+          "#7c8483",
+          "#9fa7a6",
+          "#c2cbca",
+          "#e8f1f0"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Emaille-Weiß",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Schild-Tonstufe",
+        "canonical": "#f0f5f4",
+        "oklch": "oklch(96.6% 0.005 183.0)",
+        "tonalRamp": [
+          "#090c0b",
+          "#222625",
+          "#3f4342",
+          "#5e6261",
+          "#7f8382",
+          "#a1a6a5",
+          "#c5cac9",
+          "#ebf0ef"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Schildschrift",
+        "canonical": "#111515",
+        "oklch": "oklch(19.1% 0.006 196.6)",
+        "tonalRamp": [
+          "#080c0c",
+          "#222626",
+          "#3e4343",
+          "#5d6262",
+          "#7e8383",
+          "#a1a6a6",
+          "#c5caca",
+          "#eaf0f0"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Schildschwarz",
+        "canonical": "#111515",
+        "oklch": "oklch(19.1% 0.006 196.6)",
+        "tonalRamp": [
+          "#080c0c",
+          "#222626",
+          "#3e4343",
+          "#5d6262",
+          "#7e8383",
+          "#a1a6a6",
+          "#c5caca",
+          "#eaf0f0"
+        ]
+      },
+      "ink-hover": {
+        "role": "neutral",
+        "displayName": "Graphit",
+        "canonical": "#2b3535",
+        "oklch": "oklch(32.0% 0.014 196.5)",
+        "tonalRamp": [
+          "#050d0d",
+          "#1e2727",
+          "#3a4444",
+          "#596464",
+          "#798585",
+          "#9ca8a8",
+          "#c0cccc",
+          "#e5f1f1"
+        ]
+      },
+      "on-ink-muted": {
+        "role": "neutral",
+        "displayName": "Kreidegrau",
+        "canonical": "#c9d4d3",
+        "oklch": "oklch(86.1% 0.012 190.4)",
+        "tonalRamp": [
+          "#060d0c",
+          "#1f2726",
+          "#3b4443",
+          "#5a6463",
+          "#7b8584",
+          "#9da8a7",
+          "#c1cccb",
+          "#e6f1f0"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Schiefergrün",
+        "canonical": "#4b5d5c",
+        "oklch": "oklch(46.3% 0.022 192.3)",
+        "tonalRamp": [
+          "#010e0e",
+          "#182928",
+          "#354645",
+          "#536564",
+          "#748786",
+          "#96aaa9",
+          "#bacecd",
+          "#dff4f2"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Fugengrau",
+        "canonical": "#cddbd9",
+        "oklch": "oklch(88.0% 0.015 186.6)",
+        "tonalRamp": [
+          "#040d0c",
+          "#1d2826",
+          "#394543",
+          "#586462",
+          "#798584",
+          "#9ba8a6",
+          "#bfcdcb",
+          "#e4f2f0"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Feldrand",
+        "canonical": "#6f8381",
+        "oklch": "oklch(59.3% 0.023 189.2)",
+        "tonalRamp": [
+          "#010e0d",
+          "#172927",
+          "#344644",
+          "#526664",
+          "#738785",
+          "#95aaa8",
+          "#b9cecc",
+          "#def4f2"
+        ]
+      },
+      "available": {
+        "role": "semantic",
+        "displayName": "Verfügbar-Grün",
+        "canonical": "#2eaa5c",
+        "oklch": "oklch(65.3% 0.157 151.2)",
+        "tonalRamp": [
+          "#001004",
+          "#002e12",
+          "#005024",
+          "#007537",
+          "#159c4e",
+          "#49c071",
+          "#72e694",
+          "#c7ffd3"
+        ]
+      },
+      "available-soft": {
+        "role": "semantic",
+        "displayName": "Grünhauch",
+        "canonical": "#d7f2e1",
+        "oklch": "oklch(93.7% 0.036 158.0)",
+        "tonalRamp": [
+          "#000f06",
+          "#152a1e",
+          "#31483b",
+          "#506859",
+          "#71897a",
+          "#93ac9c",
+          "#b6d1c0",
+          "#dbf6e5"
+        ]
+      },
+      "appt-ok": {
+        "role": "semantic",
+        "displayName": "Termin-Blau",
+        "canonical": "#2f6fd6",
+        "oklch": "oklch(55.7% 0.172 259.7)",
+        "tonalRamp": [
+          "#000924",
+          "#002157",
+          "#003b90",
+          "#1a5bc0",
+          "#3e7fe7",
+          "#6da5ff",
+          "#aacbff",
+          "#e5efff"
+        ]
+      },
+      "appt-partial": {
+        "role": "semantic",
+        "displayName": "Termin-Orange",
+        "canonical": "#f08c00",
+        "oklch": "oklch(73.1% 0.167 62.6)",
+        "tonalRamp": [
+          "#150700",
+          "#391d00",
+          "#623600",
+          "#8d5000",
+          "#bb6c00",
+          "#ec8900",
+          "#ffb877",
+          "#ffead9"
+        ]
+      },
+      "appt-unavailable": {
+        "role": "semantic",
+        "displayName": "Termin-Rot",
+        "canonical": "#d63a3a",
+        "oklch": "oklch(58.4% 0.193 25.5)",
+        "tonalRamp": [
+          "#1f0001",
+          "#4d0005",
+          "#80000f",
+          "#b60f1e",
+          "#de4241",
+          "#ff736b",
+          "#ffb3ab",
+          "#ffe9e6"
+        ]
+      },
+      "appt-other": {
+        "role": "semantic",
+        "displayName": "Fremdklassen-Grau",
+        "canonical": "#8a94a6",
+        "oklch": "oklch(66.4% 0.029 262.3)",
+        "tonalRamp": [
+          "#050b17",
+          "#1d2533",
+          "#3a4252",
+          "#586272",
+          "#798394",
+          "#9ba6b8",
+          "#bfcadd",
+          "#e6efff"
+        ]
+      },
+      "success": {
+        "role": "feedback",
+        "displayName": "Erfolgsgrün",
+        "canonical": "#1e8e4e",
+        "oklch": "oklch(57.1% 0.137 152.6)",
+        "tonalRamp": [
+          "#001004",
+          "#002e14",
+          "#005027",
+          "#00753b",
+          "#2e9958",
+          "#57bd7a",
+          "#7de39d",
+          "#c6ffd5"
+        ]
+      },
+      "success-text": {
+        "role": "feedback",
+        "displayName": "Erfolgsgrün (Schrift)",
+        "canonical": "#17703d",
+        "oklch": "oklch(48.2% 0.115 152.8)",
+        "tonalRamp": [
+          "#001004",
+          "#002e14",
+          "#005027",
+          "#1c7340",
+          "#449660",
+          "#68ba82",
+          "#8ddfa5",
+          "#c6ffd5"
+        ]
+      },
+      "success-soft": {
+        "role": "feedback",
+        "displayName": "Erfolgshauch",
+        "canonical": "#e3f5ea",
+        "oklch": "oklch(95.4% 0.024 159.1)",
+        "tonalRamp": [
+          "#030e08",
+          "#1b2921",
+          "#37463d",
+          "#56665c",
+          "#77877d",
+          "#99aaa0",
+          "#bdcec4",
+          "#e2f4e9"
+        ]
+      },
+      "warning": {
+        "role": "feedback",
+        "displayName": "Warnbraun",
+        "canonical": "#a14f00",
+        "oklch": "oklch(52.0% 0.131 53.4)",
+        "tonalRamp": [
+          "#170600",
+          "#3d1a00",
+          "#683100",
+          "#964900",
+          "#be692a",
+          "#e48c50",
+          "#ffb788",
+          "#ffeadd"
+        ]
+      },
+      "warning-soft": {
+        "role": "feedback",
+        "displayName": "Warnhauch",
+        "canonical": "#fff1e0",
+        "oklch": "oklch(96.5% 0.027 72.8)",
+        "tonalRamp": [
+          "#120901",
+          "#2d2316",
+          "#4b4032",
+          "#6b5f51",
+          "#8d8071",
+          "#b0a393",
+          "#d4c7b6",
+          "#faecdb"
+        ]
+      },
+      "danger": {
+        "role": "feedback",
+        "displayName": "Gefahrenrot",
+        "canonical": "#c62f2f",
+        "oklch": "oklch(54.5% 0.188 26.1)",
+        "tonalRamp": [
+          "#1f0001",
+          "#4d0004",
+          "#80000d",
+          "#b4171f",
+          "#dc4642",
+          "#ff7369",
+          "#ffb3aa",
+          "#ffe9e6"
+        ]
+      },
+      "danger-soft": {
+        "role": "feedback",
+        "displayName": "Gefahrenhauch",
+        "canonical": "#fdeaea",
+        "oklch": "oklch(95.2% 0.021 17.5)",
+        "tonalRamp": [
+          "#130808",
+          "#2e2121",
+          "#4d3e3e",
+          "#6d5d5d",
+          "#8e7e7e",
+          "#b2a0a0",
+          "#d6c4c4",
+          "#fce9e9"
+        ]
+      },
+      "info-soft": {
+        "role": "feedback",
+        "displayName": "Hinweis-Petrol",
+        "canonical": "#d5e8e5",
+        "oklch": "oklch(91.6% 0.021 185.5)",
+        "tonalRamp": [
+          "#020e0c",
+          "#192826",
+          "#364643",
+          "#556563",
+          "#758784",
+          "#97a9a7",
+          "#bbcecb",
+          "#e0f3f0"
+        ]
+      },
+      "letter-box": {
+        "role": "feedback",
+        "displayName": "Elternbrief-Gelb",
+        "canonical": "#fff4b3",
+        "oklch": "oklch(96.1% 0.083 99.7)",
+        "tonalRamp": [
+          "#0e0b00",
+          "#2c2500",
+          "#4c4200",
+          "#6d6223",
+          "#8e8346",
+          "#b1a668",
+          "#d6cb8b",
+          "#fbf0b0"
+        ]
+      },
+      "letter-box-border": {
+        "role": "feedback",
+        "displayName": "Elternbrief-Kante",
+        "canonical": "#e2b400",
+        "oklch": "oklch(78.9% 0.161 90.1)",
+        "tonalRamp": [
+          "#100a00",
+          "#2f2300",
+          "#523f00",
+          "#775e00",
+          "#9f7e00",
+          "#c9a000",
+          "#f2c32a",
+          "#ffedbe"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Überschrift der Wegweiser-Tafel im Wandformat; nur Startseite (.start-title)."
+      },
+      "headline-band": {
+        "displayName": "Headline Band",
+        "purpose": "Überschriften der vollen Startseiten-Bänder (.start-band h2)."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Seitenüberschrift h1 in Lehrkraft- und Eltern-Bereich; 2rem unter 720px."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "h2, Kartenüberschriften; Dialogtitel 1.75rem."
+      },
+      "sign-number": {
+        "displayName": "Sign Number",
+        "purpose": "Große Klassennummer im Türschild-Kopfband."
+      },
+      "sign": {
+        "displayName": "Sign",
+        "purpose": "Richtungsschilder; dieselbe Schrift in 1.25–1.75rem für Kopfbänder, 600 für Navigation und Tabellenköpfe."
+      },
+      "subtitle": {
+        "displayName": "Subtitle",
+        "purpose": "h3 in Barlow 600."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "Unterzeile und Aussagen der Startseite, max. 30–32ch."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Fließtext; Lesetext 1.0625rem / 1.6 bei max. 68ch."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Knöpfe und Feldbeschriftungen."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Codes und Termin-Schlüssel in Barlow mit Tabellenziffern (kein Monospace)."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow-strong",
+        "value": "0 14px 36px -10px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.1)",
+        "purpose": "Nur was schwebt: Dialog, Toast, gezogener Name, Kachel beim Anheben mit der Maus."
+      },
+      {
+        "name": "sheet",
+        "value": "0 0 0 2px var(--c-ink), 0 -10px 30px rgba(0, 0, 0, 0.22)",
+        "purpose": "Detailfeld des Terminplans als Blatt am unteren Bildschirmrand."
+      },
+      {
+        "name": "focus",
+        "value": "0 0 0 3px var(--c-accent), 0 0 0 5px var(--c-ink)",
+        "purpose": "Fokusring (--focus): gelber Innen-, schwarzer Außenring; ersetzt outline."
+      },
+      {
+        "name": "selection-ring",
+        "value": "0 0 0 2px var(--c-ink)",
+        "purpose": "Harter Ring ohne Versatz für ausgewählte Namen und Termine."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "Standardkurve für Zustandswechsel, Druck und Erscheinen (--ease-out)."
+      },
+      {
+        "name": "ease-in-out",
+        "value": "cubic-bezier(0.77, 0, 0.175, 1)",
+        "purpose": "Aufdecken des Briefs auf der Startseite (clip-path)."
+      },
+      {
+        "name": "ease-drawer",
+        "value": "cubic-bezier(0.32, 0.72, 0, 1)",
+        "purpose": "Blatt am unteren Rand im Terminplan (280ms)."
+      },
+      {
+        "name": "dur-press",
+        "value": "120ms",
+        "purpose": "Druck (scale 0.96–0.98) und schnelle Slot-Wechsel."
+      },
+      {
+        "name": "dur-fast",
+        "value": "160ms",
+        "purpose": "Farb- und Randwechsel bei Hover und Auswahl."
+      },
+      {
+        "name": "dur",
+        "value": "220ms",
+        "purpose": "Dialog, Toast, Anheben von Kacheln, Pfeil-Ausweichen."
+      },
+      {
+        "name": "snap",
+        "value": "260ms cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "Einrasten eines Namens in der Türliste (translateX(-10px) scale(0.96) → Ruhe)."
+      },
+      {
+        "name": "start-rise",
+        "value": "600ms cubic-bezier(0.23, 1, 0.32, 1), Versatz 60ms je Element",
+        "purpose": "Erscheinen beim Scrollen, nur Startseite, nur mit Bewegung und IntersectionObserver."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce",
+        "purpose": "Alle Animationen und Übergänge auf 1ms, kein Druck- oder Anhebe-Transform; nur der Spinner dreht weiter."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "dialog-stack",
+        "value": "520px",
+        "purpose": "Darunter stehen Dialog-Knöpfe untereinander in voller Breite."
+      },
+      {
+        "name": "parent-wide",
+        "value": "600px",
+        "purpose": "Ab hier (min-width) größeres Slot-Raster und Werkzeuge in einer Zeile bei den Eltern."
+      },
+      {
+        "name": "phone-forms",
+        "value": "640px",
+        "purpose": "Darunter Formulare einspaltig, Startseite im Smartphone-Maß."
+      },
+      {
+        "name": "phone",
+        "value": "720px",
+        "purpose": "Darunter scrollt die Kopfzeile mit, h1 2rem, Karten 18px 16px, Toasts oben."
+      },
+      {
+        "name": "start-single",
+        "value": "980px",
+        "purpose": "Darunter erster Bildschirm der Startseite einspaltig, Flügelstreifen waagerecht."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Schwarzes Schild für die eine Hauptaktion einer Ansicht.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Gespräche terminieren</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 18px; border: 2px solid var(--c-ink, #111515); border-radius: var(--radius-small, 3px); background: var(--c-ink, #111515); color: #fff; font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); font-size: 16px; font-weight: 600; line-height: 1.2; cursor: pointer; transition: background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 120ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-btn-primary:hover { background: var(--c-ink-hover, #2b3535); border-color: var(--c-ink-hover, #2b3535); } .ds-btn-primary:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); } .ds-btn-primary:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Zusatzschild: weiß mit 2px schwarzem Rand für Nebenaktionen; Hover Gelbhauch.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">Zwischenstand speichern</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 18px; border: 2px solid var(--c-ink, #111515); border-radius: var(--radius-small, 3px); background: var(--c-surface, #ffffff); color: var(--c-ink, #111515); font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); font-size: 16px; font-weight: 600; line-height: 1.2; cursor: pointer; transition: background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 120ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-btn-secondary:hover { background: var(--c-accent-soft, #fcefbf); } .ds-btn-secondary:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); } .ds-btn-secondary:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Feld mit Beschriftung darüber und Hinweis darunter; Fokus mit schwarzem Rand und gelb-schwarzem Ring.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-field-label\" for=\"ds-lastname\">Nachname</label><input class=\"ds-input\" id=\"ds-lastname\" type=\"text\" value=\"Beck\"><span class=\"ds-field-hint\">Wie im gelben Kasten des Elternbriefs</span></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; max-width: 320px; font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); color: var(--c-text, #111515); } .ds-field-label { font-weight: 600; } .ds-field-hint { font-size: 0.875rem; color: var(--c-muted, #4b5d5c); } .ds-input { font: inherit; min-height: 44px; padding: 9px 12px; border: 1px solid var(--c-border-strong, #6f8381); border-radius: var(--radius-small, 3px); background: var(--c-surface, #ffffff); color: var(--c-text, #111515); transition: border-color 160ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-input:hover { border-color: var(--c-ink, #111515); } .ds-input:focus-visible, .ds-input:focus { outline: none; border-color: var(--c-ink, #111515); box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); }"
+    },
+    {
+      "name": "Kopfzeile (Petrol-Flügel)",
+      "kind": "nav",
+      "refersTo": "header-teacher",
+      "description": "Kopfzeile in der Flügelfarbe mit Logo-Schild und Links; aktueller Ort mit 3px gelbem Unterstrich. Eltern: gleiche Form in Signalgelb mit schwarzer Schrift.",
+      "html": "<header class=\"ds-header\"><a class=\"ds-logo\" href=\"#\"><svg viewBox=\"0 0 64 64\" width=\"36\" height=\"36\" aria-hidden=\"true\"><rect width=\"64\" height=\"64\" rx=\"7\" fill=\"#111515\"/><path fill=\"#ffffff\" fill-rule=\"evenodd\" d=\"M10 10h15c4.4 0 7 2.6 7 7v6c0 4.4-2.6 7-7 7h-7v12h-8zm8 6.5v7h5.5c.8 0 1-.2 1-1v-5c0-.8-.2-1-1-1zM36 10h11c4.4 0 7 2.6 7 7v18c0 4.4-2.6 7-7 7H36zm8 6.5v19h1.5c.8 0 1-.2 1-1v-17c0-.8-.2-1-1-1z\"/><rect x=\"10\" y=\"48\" width=\"44\" height=\"6\" fill=\"#f3c522\"/></svg><span class=\"ds-logo-text\">ParentsDay</span></a><nav class=\"ds-nav\" aria-label=\"Bereich\"><a href=\"#\" aria-current=\"page\">Klassen</a><a href=\"#\">Elternsprechtag</a><a href=\"#\">Datenschutz</a></nav></header>",
+      "css": ".ds-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 28px; min-height: 68px; padding: 10px 16px; background: var(--c-wall, #0a5f60); color: #fff; } .ds-logo { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; border-radius: var(--radius-small, 3px); } .ds-logo:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); } .ds-logo-text { font-family: var(--font-display, 'Barlow Condensed', 'Arial Narrow', 'Barlow', system-ui, sans-serif); font-weight: 800; font-size: 1.75rem; line-height: 1; } .ds-nav { display: flex; flex-wrap: wrap; gap: 4px 22px; } .ds-nav a { color: inherit; text-decoration: none; font-family: var(--font-display, 'Barlow Condensed', 'Arial Narrow', 'Barlow', system-ui, sans-serif); font-weight: 600; font-size: 1.125rem; letter-spacing: 0.01em; padding: 6px 0 4px; border-bottom: 3px solid transparent; transition: border-color 160ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-nav a:hover, .ds-nav a[aria-current='page'] { border-bottom-color: var(--c-accent, #f3c522); } .ds-nav a:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); }"
+    },
+    {
+      "name": "Richtungsschild",
+      "kind": "custom",
+      "refersTo": "direction-sign-teacher",
+      "description": "Zugang als Schild mit Pfeil: schwarz für Lehrkräfte, signalgelb für Eltern; Pfeil weicht bei Maus-Hover 4px aus.",
+      "html": "<nav class=\"ds-signs\" aria-label=\"Zugänge\"><a class=\"ds-sign ds-sign-teacher\" href=\"#\"><span>Zugang für Lehrkräfte</span><svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" aria-hidden=\"true\" fill=\"currentColor\"><path d=\"M4 10.5h11.9l-5-5L13 3.4l8.6 8.6-8.6 8.6-2.1-2.1 5-5H4z\"/></svg></a><a class=\"ds-sign ds-sign-parent\" href=\"#\"><span>Zugang für Eltern</span><svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" aria-hidden=\"true\" fill=\"currentColor\"><path d=\"M4 10.5h11.9l-5-5L13 3.4l8.6 8.6-8.6 8.6-2.1-2.1 5-5H4z\"/></svg></a></nav>",
+      "css": ".ds-signs { display: flex; flex-direction: column; gap: 12px; max-width: 420px; } .ds-sign { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding: 12px 22px 12px 24px; border-radius: var(--radius, 4px); font-family: var(--font-display, 'Barlow Condensed', 'Arial Narrow', 'Barlow', system-ui, sans-serif); font-weight: 700; font-size: 1.5rem; line-height: 1.1; text-decoration: none; transition: background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 120ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-sign svg { font-size: 1.15em; transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-sign-teacher { background: var(--c-ink, #111515); color: #fff; } .ds-sign-teacher:hover { background: var(--c-ink-hover, #2b3535); } .ds-sign-parent { background: var(--c-accent, #f3c522); color: var(--c-ink, #111515); } .ds-sign:hover svg { transform: translateX(4px); } .ds-sign:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); } .ds-sign:active { transform: translateY(1px); } @media (prefers-reduced-motion: reduce) { .ds-sign, .ds-sign svg { transition: none; } .ds-sign:hover svg, .ds-sign:active { transform: none; } }"
+    },
+    {
+      "name": "Türschild (Klassenkachel)",
+      "kind": "card",
+      "refersTo": "door-sign-head",
+      "description": "Weißes Schild mit schwarzem Kopfband und großer schmaler Nummer; Statuspunkt gelb = offen, grün = fertig; hebt sich bei Maus-Hover.",
+      "html": "<a class=\"ds-door\" href=\"#\"><span class=\"ds-door-head\"><span class=\"ds-door-label\">Klasse</span><span class=\"ds-door-name\">5a</span><span class=\"ds-door-dot\" aria-hidden=\"true\"></span></span><span class=\"ds-door-count\">24 Lernende</span><span class=\"ds-door-status\">Elternbriefe erstellen<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" aria-hidden=\"true\" fill=\"currentColor\"><path d=\"M4 10.5h11.9l-5-5L13 3.4l8.6 8.6-8.6 8.6-2.1-2.1 5-5H4z\"/></svg></span></a>",
+      "css": ".ds-door { display: flex; flex-direction: column; width: 240px; min-height: 190px; overflow: hidden; border-radius: var(--radius, 4px); background: var(--c-surface, #ffffff); color: var(--c-text, #111515); text-decoration: none; font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 220ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-door:hover { transform: translateY(-3px); box-shadow: var(--shadow-strong, 0 14px 36px -10px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.1)); } .ds-door:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); } .ds-door-head { display: flex; align-items: baseline; gap: 10px; padding: 12px 18px 11px; background: var(--c-ink, #111515); color: #fff; } .ds-door-label { font-family: var(--font-display, 'Barlow Condensed', 'Arial Narrow', 'Barlow', system-ui, sans-serif); font-weight: 600; font-size: 1.3rem; color: #c9d4d3; } .ds-door-name { font-family: var(--font-display, 'Barlow Condensed', 'Arial Narrow', 'Barlow', system-ui, sans-serif); font-weight: 800; font-size: 3.4rem; line-height: 0.9; letter-spacing: -0.01em; } .ds-door-dot { align-self: center; width: 14px; height: 14px; margin-left: auto; border-radius: 50%; background: var(--c-accent, #f3c522); } .ds-door-count { padding: 14px 18px 0; font-weight: 600; font-variant-numeric: tabular-nums; } .ds-door-status { display: flex; align-items: center; gap: 8px; margin: auto 18px 0; padding: 12px 0 14px; border-top: 1px solid var(--c-border, #cddbd9); color: var(--c-warning, #a14f00); font-size: 0.95rem; font-weight: 600; } .ds-door-status svg { margin-left: auto; color: var(--c-muted, #4b5d5c); transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-door:hover .ds-door-status svg { transform: translateX(4px); color: var(--c-ink, #111515); }"
+    },
+    {
+      "name": "Badges und Code",
+      "kind": "chip",
+      "refersTo": "badge-info",
+      "description": "Kleine Etiketten in der Tonstufe ihrer Meldungsfarbe; Codes auf Petrol-Hauch mit Tabellenziffern.",
+      "html": "<div class=\"ds-badges\"><span class=\"ds-badge ds-badge-info\">12 Rückmeldungen</span><span class=\"ds-badge ds-badge-success\">Alle eingetragen</span><span class=\"ds-badge ds-badge-warning\">3 offen</span><span class=\"ds-badge ds-badge-danger\">Code fehlt</span><code class=\"ds-code\">K7M2-4XQ9</code></div>",
+      "css": ".ds-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); } .ds-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-small, 3px); font-size: 0.82rem; font-weight: 600; white-space: nowrap; } .ds-badge-info { background: var(--c-primary-soft, #d5e8e5); color: var(--c-primary-dark, #084a4b); } .ds-badge-success { background: var(--c-success-soft, #e3f5ea); color: var(--c-success-text, #17703d); } .ds-badge-warning { background: var(--c-warning-soft, #fff1e0); color: var(--c-warning, #a14f00); } .ds-badge-danger { background: var(--c-danger-soft, #fdeaea); color: var(--c-danger, #c62f2f); } .ds-code { padding: 2px 8px; border-radius: var(--radius-small, 3px); background: var(--c-primary-soft, #d5e8e5); color: var(--c-primary-dark, #084a4b); font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); font-size: 0.95em; font-weight: 500; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Name in der Wartebank",
+      "kind": "chip",
+      "refersTo": "chip-selected",
+      "description": "Noch nicht terminierter Name; ausgewählt Gelbhauch mit schwarzem Rand und hartem Ring, unbekannte Zeiten gestrichelt.",
+      "html": "<ul class=\"ds-bench\"><li><button class=\"ds-chip\" type=\"button\" aria-pressed=\"true\">Jörg Müller <span class=\"ds-chip-dur\">10 Min.</span></button></li><li><button class=\"ds-chip\" type=\"button\" aria-pressed=\"false\">Ayşe Çelik <span class=\"ds-chip-dur\">10 Min.</span></button></li><li><button class=\"ds-chip ds-chip-unknown\" type=\"button\" aria-pressed=\"false\">Tom Richter</button></li></ul>",
+      "css": ".ds-bench { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; } .ds-chip { min-height: 40px; padding: 5px 11px; border: 2px solid var(--c-border, #cddbd9); border-radius: var(--radius-small, 3px); background: var(--c-surface, #ffffff); color: var(--c-ink, #111515); font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); font-size: 16px; font-weight: 600; cursor: pointer; transition: background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 120ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-chip:hover { background: var(--c-accent-soft, #fcefbf); border-color: var(--c-ink, #111515); } .ds-chip[aria-pressed='true'] { background: var(--c-accent-soft, #fcefbf); border-color: var(--c-ink, #111515); box-shadow: 0 0 0 2px var(--c-ink, #111515); } .ds-chip:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); } .ds-chip:active { transform: scale(0.96); } .ds-chip-unknown { border-style: dashed; } .ds-chip-dur { font-weight: 500; }"
+    },
+    {
+      "name": "Eltern-Slot",
+      "kind": "custom",
+      "refersTo": "parent-slot-selected",
+      "description": "Zeitslot der Eltern am Handy: Beginn groß, Ende klein; markiert Verfügbar-Grün mit gezeichnetem Haken.",
+      "html": "<div class=\"ds-slots\"><button class=\"ds-slot\" type=\"button\" aria-pressed=\"true\"><span class=\"ds-slot-start\">14:00</span><span class=\"ds-slot-end\">bis 14:10</span><svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" aria-hidden=\"true\" fill=\"currentColor\"><path d=\"M9.4 16.4 4.6 11.6l-2.1 2.1 6.9 6.9L21.5 8.5l-2.1-2.1z\"/></svg></button><button class=\"ds-slot\" type=\"button\" aria-pressed=\"false\"><span class=\"ds-slot-start\">14:10</span><span class=\"ds-slot-end\">bis 14:20</span></button></div>",
+      "css": ".ds-slots { display: grid; grid-template-columns: repeat(2, 104px); gap: 8px; } .ds-slot { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 56px; padding: 5px 4px; border: 2px solid var(--c-border-strong, #6f8381); border-radius: var(--radius-small, 3px); background: var(--c-surface, #ffffff); color: var(--c-text, #111515); font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 120ms cubic-bezier(0.23, 1, 0.32, 1), border-color 120ms cubic-bezier(0.23, 1, 0.32, 1), transform 120ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-slot-start { font-family: var(--font-display, 'Barlow Condensed', 'Arial Narrow', 'Barlow', system-ui, sans-serif); font-size: 1.3rem; font-weight: 700; } .ds-slot-end { font-size: 0.82rem; font-weight: 500; color: var(--c-muted, #4b5d5c); } .ds-slot svg { position: absolute; top: 5px; right: 5px; } .ds-slot:hover { border-color: var(--c-available, #2eaa5c); background: var(--c-available-soft, #d7f2e1); } .ds-slot[aria-pressed='true'] { background: var(--c-available, #2eaa5c); border-color: var(--c-success, #1e8e4e); } .ds-slot[aria-pressed='true'] .ds-slot-end { color: inherit; font-weight: 600; } .ds-slot[aria-pressed='true']:hover { border-color: var(--c-text, #111515); } .ds-slot:focus-visible { outline: none; border-color: var(--c-ink, #111515); box-shadow: var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); } .ds-slot[aria-pressed='true']:focus-visible { border-color: var(--c-text, #111515); box-shadow: inset 0 0 0 2px #fff, var(--focus, 0 0 0 3px #f3c522, 0 0 0 5px #111515); } .ds-slot:active { transform: scale(0.96); }"
+    },
+    {
+      "name": "Terminblöcke",
+      "kind": "custom",
+      "refersTo": "appointment-ok",
+      "description": "Gesetzte Termine in den Fachfarben (passt, ragt hinein, nicht verfügbar); Überschneidung als Schraffur-Zustand, nicht als Schmuck.",
+      "html": "<div class=\"ds-appts\"><div class=\"ds-appt ds-appt-ok\">14:00 Anna Beck</div><div class=\"ds-appt ds-appt-partial\">14:20 Jörg Müller</div><div class=\"ds-appt ds-appt-unavailable\">14:30 Mats Krüger</div><div class=\"ds-appt ds-appt-ok ds-appt-overlap\">14:30 Ayşe Çelik – überschneidet sich</div><div class=\"ds-appt ds-appt-other\">14:40 andere Klasse</div></div>",
+      "css": ".ds-appts { display: flex; flex-direction: column; gap: 4px; width: 260px; font-family: var(--font, 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif); } .ds-appt { padding: 5px 8px; border: 1px solid var(--c-surface, #ffffff); border-radius: var(--radius-small, 3px); font-size: 0.82rem; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; } .ds-appt-ok { background-color: var(--c-appt-ok, #2f6fd6); color: #fff; } .ds-appt-partial { background-color: var(--c-appt-partial, #f08c00); color: var(--c-text, #111515); } .ds-appt-unavailable { background-color: var(--c-appt-unavailable, #d63a3a); color: #fff; } .ds-appt-other { background-color: #e9eeee; color: #34403f; border-color: var(--c-appt-other, #8a94a6); font-weight: 600; } .ds-appt-overlap { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0 5px, transparent 5px 10px); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Leitsystem im Schulflur",
+    "overview": "ParentsDay sieht aus wie das Leitsystem eines Schulflurs am Elternsprechtag: Flügelfarben zeigen, wo man ist, Schilder tragen Klasse, Datum und Uhrzeit, und die Türliste ist der Terminplan. Petrol (`--c-wall`) ist der Flügel der Lehrkräfte und der öffentlichen Seiten, Signalgelb (`--c-accent`) der Flügel der Eltern. Inhalte stehen auf emaille-weißen Schildern (`.card`) an der hellen, leicht petrol getönten Flurwand (`--c-bg`); die Schildschrift ist fast schwarz.\n\nZwei Dichten, ein System. Die Startseite (`css/views/start.css`) überzeugt mit Maßstabssprung: volle Bänder in Flurfarben, eine Wegweiser-Tafel mit Überschrift im Wandformat und eine Türliste zum Ausprobieren. Lehrkraft- und Eltern-Bereich sind Arbeitsfläche – Tabelle, Kalender, Status –, die Schilder werden kleiner, die Regeln bleiben. Bewegung ist kurz und entschieden (`--ease-out`, 120/160/220 ms). Bildmaterial sind echte Oberflächen- und PDF-Ausschnitte mit gekennzeichneten Beispieldaten auf weißem Schild (`img/start/*.webp`, Herkunft je Datei in `*.webp.json`).\n\nAbgelehnt sind die zentrierte Überschrift über zwei Knöpfen mit einer Reihe gleicher Schritt-Karten, der blasse Schul-App-Look, Schulheft-Kitsch und Behörden-Look. Harte Rahmenbedingung ist die strenge Content-Security-Policy in `index.html` (`style-src 'self'`, `font-src 'self'`, `img-src 'self' data: blob:`): keine `style`-Attribute, keine Inline-Stile; dynamische Werte setzt der Code über CSSOM, bevorzugt als Custom Property (`--i`, `--parent-cols-sm`/`--parent-cols-lg`, `--header-h`); Schriften und Bilder liegen im Projekt. Die PDFs (`js/pdf/*`, Farben in `COLORS` aus `js/core/pdf.js`) tragen noch das ältere blaue Erscheinungsbild und liegen vorerst außerhalb dieses Systems; nur der gelbe Kasten des Elternbriefs ist mit der Oberfläche farbgleich.",
+    "keyCharacteristics": [
+      "Flügelfarben statt Schmuckfarben: Petrol für Lehrkräfte und öffentliche Seiten, Signalgelb für Eltern.",
+      "Emaille-weiße Schilder mit kleinen Ecken an heller Flurwand, flach im Ruhezustand.",
+      "Das Türschild als wiederkehrende Form: schwarzes Kopfband mit großer Nummer, Datum oder Uhrzeit.",
+      "Schwarz ist die Hauptaktion; Gelb markiert Auswahl, aktuellen Ort, Schrittnummer und Fokus.",
+      "Eine Schriftfamilie in zwei Breiten: Barlow für Text, Barlow Condensed für Überschriften, Nummern und Schilder; Zahlen in Tabellenziffern.",
+      "Fachfarben (grün, blau, orange, rot, grau) mit fester Bedeutung, nie Dekoration.",
+      "Alles selbst gehostet und CSP-fest: keine Inline-Stile, keine fremden Server."
+    ],
+    "rules": [
+      {
+        "name": "The Wing Rule",
+        "body": "Die Flügelfarbe zeigt, wo man ist: Die Kopfzeile trägt immer genau einen Flügel – Petrol für öffentliche Seiten und Lehrkräfte, Signalgelb für Eltern. Gelbe Elemente auf Petrol (Flügelstreifen, Elternschild) weisen den Weg in den Eltern-Flügel.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fixed Meaning Rule",
+        "body": "Grün, Blau, Orange, Rot und Grau bedeuten immer dasselbe: frei, passt, ragt hinein, nicht verfügbar, andere Klasse. Sie dienen nie zur Auszeichnung, Gliederung oder Dekoration, und keine andere Farbe übernimmt ihre Bedeutung.",
+        "section": "colors"
+      },
+      {
+        "name": "The Yellow Marker Rule",
+        "body": "Gelb markiert, was gerade gemeint ist: Auswahl, aktueller Ort, Schrittnummer, offener Status, heutiger Tag, Fokus. Die Hauptaktion ist schwarz, nicht gelb; einzig das Richtungsschild „Zugang für Eltern“ ist gelb, weil es den Eltern-Flügel trägt.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Family Rule",
+        "body": "Nur Barlow und Barlow Condensed: keine zweite Familie, keine Monospace, keine Systemschrift als Display. Die schmale Breite gehört Überschriften, Nummern, Uhrzeiten, Tabellenköpfen und Schildern; Fließtext ist nie schmal.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Figures Rule",
+        "body": "Uhrzeiten, Daten, Codes und Anzahlen stehen in Tabellenziffern (`font-variant-numeric: tabular-nums`) – in Tabellen, Zeit- und Zahlfeldern, Slots, Tageskopfbändern, Kalendern, Zählern und der Speicheranzeige.",
+        "section": "typography"
+      },
+      {
+        "name": "The Scale Jump Rule",
+        "body": "Rang entsteht durch Größe und Breite, nicht durch weitere Gewichte (Text 400, Beschriftung 600, Schild 700/800). Den Sprung ins Wandformat – Tafel bis 5rem, „ParentsDay“ im Abschluss bis 10.5rem, „Fragen“ in 30cqw bis 9rem (Obergrenzen höchstens 2,5 × Untergrenze, damit die Wörter beim Zoomen auf 200 % mitwachsen) – gibt es nur auf der Startseite; in den Bereichen endet die Skala bei h1 mit 2.5rem.",
+        "section": "typography"
+      },
+      {
+        "name": "The Whole Slot Rule",
+        "body": "Zeit erscheint in ganzen Planfeldern: Die Türliste hat eine 44px-Zeile je 10 Minuten, Slot-Zeilen beginnen an vollen Stunden, Uhrzeiten stehen in einer eigenen Spalte links.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Enamel Rule",
+        "body": "Im Ruhezustand wirft nichts einen Schatten. Schatten antworten nur auf einen Zustand: geöffnet (Dialog, Toast, Blatt), gezogen oder mit der Maus angehoben.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Small Corner Rule",
+        "body": "Keine Radien über 6px, keine Pillenformen.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Dashed Means Open Rule",
+        "body": "Gestrichelt heißt offen oder unbestimmt: leere Zeile der Türliste, Ablagefläche (`.dropzone`), Termin oder Name mit unbekannten Zeiten (`.sched-appt-unknown`, `.sched-chip-unknown`), Vorschau beim Ziehen. Feste Dinge haben durchgehende Ränder.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do Inhalte als emaille-weiße Schilder (`surface`, `radius` 4px, ohne Schatten und Rand) auf die Flurwand (`bg`) setzen.",
+      "Do die Kopfzeile in der Flügelfarbe des Bereichs halten: Petrol (`wall`) für öffentliche Seiten und Lehrkräfte, Signalgelb (`accent`) mit schwarzer Schrift für Eltern.",
+      "Do Nummern, Daten und Uhrzeiten als Türschild zeigen: schwarzes Kopfband, Barlow Condensed 700/800, Tabellenziffern.",
+      "Do die Hauptaktion als schwarzes Schild (`.btn-primary`) und Nebenaktionen als weißes Schild mit 2px schwarzem Rand (`.btn-secondary`) gestalten.",
+      "Do Auswahl, aktuellen Ort, Schrittnummer und Fokus gelb markieren; den Fokus immer über `--focus`.",
+      "Do Fachfarben nur in ihrer Bedeutung verwenden und in einer Legende (`.legend`) erklären.",
+      "Do dynamische Werte über CSSOM setzen, möglichst als Custom Property (`el.style.setProperty('--name', …)`), und Schriften, Bilder und Icons im Projekt ablegen.",
+      "Do Bewegung nur mit `--ease-out`, `--ease-in-out` oder `--ease-drawer` und den Dauern `--dur-press`, `--dur-fast`, `--dur` gestalten (Ausnahme: Erscheinen beim Scrollen auf der Startseite), Hover-Bewegung nur unter `(hover: hover) and (pointer: fine)`, und `prefers-reduced-motion` abschalten lassen.",
+      "Do Beispieldaten sichtbar mit dem Etikett „Beispiel“ kennzeichnen."
+    ],
+    "donts": [
+      "Don't Schatten im Ruhezustand verwenden; `--shadow-strong` gehört nur Dialog, Toast, gezogenen Elementen und dem Anheben bei Maus-Hover.",
+      "Don't farbige Seitenstreifen an Karten, Hinweisen oder Toasts setzen; der gelbe Flügelstreifen der Startseite ist ein Element der Wand, kein Kartenschmuck.",
+      "Don't Verläufe als Schmuck einsetzen; die Schraffur bleibt das Zeichen für Überschneidung im Terminplan, das Punktraster der Griff zum Ziehen.",
+      "Don't Grün, Blau, Orange, Rot oder Grau zur Dekoration oder Gliederung verwenden.",
+      "Don't Radien über 6px oder Pillenformen verwenden.",
+      "Don't eine zweite Schriftfamilie, Monospace oder Schriften von fremden Servern einbinden.",
+      "Don't Schriftzeichen wie ✓, × oder → als Icons verwenden; nur die gezeichneten Masken-Icons.",
+      "Don't `style`-Attribute oder Inline-Stile schreiben; die CSP (`style-src 'self'`) blockiert sie.",
+      "Don't den Sprung ins Wandformat in den Lehrkraft- oder Eltern-Bereich übertragen.",
+      "Don't das blaue Erscheinungsbild der PDFs in die Oberfläche zurückholen; die PDFs liegen vorerst außerhalb dieses Systems.",
+      "Don't die zentrierte Überschrift über zwei Knöpfen mit einer Reihe gleicher Schritt-Karten bauen, und nicht den blassen Schul-App-Look, Schulheft-Kitsch oder Behörden-Look."
+    ]
+  }
+}

@@ -49,7 +49,8 @@
   color: var(--c-primary-dark);
 }
 .link-button:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: var(--focus);
   border-radius: 2px;
 }
@@ -164,14 +165,15 @@
 .tauth-cloud {
   margin: 18px 0 0;
   padding: 14px 16px 16px;
-  border: 1px solid var(--c-border);
-  border-left: 5px solid var(--c-primary);
+  border: 1px solid var(--c-border-strong);
   border-radius: var(--radius);
   background: var(--c-surface-2);
   min-width: 0;
 }
 .tauth-cloud legend {
   padding: 0 6px;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
   font-weight: 700;
 }
 .tauth-cloud-text {
